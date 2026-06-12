@@ -1,23 +1,15 @@
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
-import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
-import { docClient, TABLE_NAME, getUserId, GetCommand, PutCommand, UpdateCommand, QueryCommand } from '../lib/db.js';
+import { docClient, TABLE_NAME, getUserId, GetCommand, PutCommand } from '../lib/db.js';
 import { ok, badRequest, internalError, notImplemented } from '../lib/response.js';
 
-const smClient = new SecretsManagerClient({});
-const SECRET_ARN = process.env.DNDBEYOND_SECRET_ARN!;
-const DNDBEYOND_API_BASE = 'https://www.dndbeyond.com/api';
-const OAUTH_TOKEN_URL = 'https://auth.dndbeyond.com/oauth2/token';
-
-interface DdbCredentials {
-  clientId: string;
-  clientSecret: string;
-}
+// D&D Beyond API endpoints (reverse-engineered — verify via browser Network tab if these change)
+const DDB_CHARACTER_SERVICE = 'https://character-service.dndbeyond.com/character/v5';
+const DDB_COBALT_TOKEN_URL  = 'https://auth-service.dndbeyond.com/v1/cobalt-token';
 
 export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
   try {
     const { routeKey } = event;
     switch (routeKey) {
-      case 'POST /dndbeyond/token':                                          return exchangeToken(event);
       case 'GET /dndbeyond/characters':                                      return listDndCharacters(event);
       case 'POST /characters/{id}/import/dndbeyond/{ddbCharId}':            return importCharacter(event);
       default:                                                               return notImplemented();
@@ -27,50 +19,6 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   }
 };
 
-/** POST /dndbeyond/token
- *  Exchanges an OAuth authorization code for a D&D Beyond access token.
- *  Body: { code: string; redirectUri: string }
- *  Returns: { accessToken: string; expiresIn: number; userId: string }
- *
- *  The client secret is fetched from Secrets Manager — never exposed to the browser.
- */
-async function exchangeToken(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-  const body = JSON.parse(event.body ?? '{}') as { code?: string; redirectUri?: string };
-  if (!body.code) return badRequest('code is required');
-  if (!body.redirectUri) return badRequest('redirectUri is required');
-
-  const creds = await getDdbCredentials();
-
-  const params = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code: body.code,
-    redirect_uri: body.redirectUri,
-    client_id: creds.clientId,
-    client_secret: creds.clientSecret,
-  });
-
-  const response = await fetch(OAUTH_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error('DDB token exchange failed:', response.status, text);
-    return badRequest('Failed to exchange token with D&D Beyond');
-  }
-
-  const data = await response.json() as {
-    access_token: string; expires_in: number; token_type: string;
-  };
-
-  return ok({
-    accessToken: data.access_token,
-    expiresIn: data.expires_in,
-  });
-}
-
 /** GET /dndbeyond/characters
  *  Lists the authenticated user's D&D Beyond characters.
  *  Query param: accessToken (D&D Beyond OAuth token, passed from client)
@@ -79,19 +27,40 @@ async function exchangeToken(event: APIGatewayProxyEventV2): Promise<APIGatewayP
  *  ephemeral and user-owned — we never persist it server-side.
  */
 async function listDndCharacters(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-  const accessToken = event.queryStringParameters?.['accessToken'];
-  if (!accessToken) return badRequest('accessToken query param is required');
+  const cobaltSession = event.queryStringParameters?.['accessToken'];
+  if (!cobaltSession) return badRequest('accessToken query param is required');
 
-  const response = await fetch(`${DNDBEYOND_API_BASE}/v5/character`, {
-    headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' },
+  // Exchange the CobaltSession browser cookie for a short-lived JWT + userId
+  let auth: CobaltAuth;
+  try {
+    auth = await cobaltSessionToJwt(cobaltSession);
+  } catch (err) {
+    return badRequest((err as Error).message);
+  }
+
+  const listUrl = `${DDB_CHARACTER_SERVICE}/characters/list${auth.userId ? `?userId=${auth.userId}` : ''}`;
+  const response = await fetch(listUrl, {
+    headers: {
+      'Authorization': `Bearer ${auth.jwt}`,
+      'Accept': 'application/json',
+    },
   });
 
   if (!response.ok) {
-    return badRequest('Failed to fetch characters from D&D Beyond');
+    const body = await response.text().catch(() => '');
+    console.error(`DDB list characters failed: HTTP ${response.status}`, body);
+    return badRequest(`D&D Beyond returned ${response.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
   }
 
-  const data = await response.json() as { data: unknown[] };
-  const characters = (data.data ?? []).map((char: unknown) => {
+  const data = await response.json() as Record<string, unknown>;
+
+  // Response shape: { id, success, message, data: { characterSlotLimit, characters: [...] }, pagination }
+  const inner = data['data'] as Record<string, unknown> | undefined;
+  const rawList: unknown[] = Array.isArray(inner?.['characters'])
+    ? inner!['characters'] as unknown[]
+    : [];
+
+  const characters = rawList.map((char: unknown) => {
     const c = char as Record<string, unknown>;
     return {
       id: c['id'],
@@ -127,13 +96,25 @@ async function importCharacter(event: APIGatewayProxyEventV2): Promise<APIGatewa
   if (!targetCharacterId)   return badRequest('id path param is required');
   if (!dndCharacterId)      return badRequest('ddbCharId path param is required');
 
-  // Fetch full character from D&D Beyond
-  const response = await fetch(`${DNDBEYOND_API_BASE}/v5/character/${dndCharacterId}`, {
-    headers: { 'Authorization': `Bearer ${body.accessToken}`, 'Accept': 'application/json' },
+  // Exchange CobaltSession for JWT, then fetch the full character
+  let auth: CobaltAuth;
+  try {
+    auth = await cobaltSessionToJwt(body.accessToken);
+  } catch (err) {
+    return badRequest((err as Error).message);
+  }
+
+  const response = await fetch(`${DDB_CHARACTER_SERVICE}/character/${dndCharacterId}?includeCustomItems=true`, {
+    headers: {
+      'Authorization': `Bearer ${auth.jwt}`,
+      'Accept': 'application/json',
+    },
   });
 
   if (!response.ok) {
-    return badRequest('Failed to fetch character from D&D Beyond');
+    const errBody = await response.text().catch(() => '');
+    console.error(`DDB fetch character failed: HTTP ${response.status}`, errBody);
+    return badRequest(`D&D Beyond returned ${response.status}${errBody ? `: ${errBody.slice(0, 200)}` : ''}`);
   }
 
   const data = await response.json() as { data: Record<string, unknown> };
@@ -185,9 +166,49 @@ async function importCharacter(event: APIGatewayProxyEventV2): Promise<APIGatewa
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function getDdbCredentials(): Promise<DdbCredentials> {
-  const result = await smClient.send(new GetSecretValueCommand({ SecretId: SECRET_ARN }));
-  return JSON.parse(result.SecretString ?? '{}') as DdbCredentials;
+interface CobaltAuth { jwt: string; userId: string; }
+
+/**
+ * Exchange a CobaltSession browser cookie for a short-lived JWT.
+ * Also decodes the JWT payload to extract userId (needed for the characters list endpoint).
+ */
+async function cobaltSessionToJwt(cobaltSession: string): Promise<CobaltAuth> {
+  const res = await fetch(DDB_COBALT_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      'Cookie': `CobaltSession=${cobaltSession}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: '{}',
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error(`Cobalt token exchange failed: HTTP ${res.status}`, body);
+    throw new Error(`Token exchange returned ${res.status} — check that your CobaltSession value is current`);
+  }
+  const data = await res.json() as { token?: string; cobalt?: string };
+  const jwt = data.token ?? data.cobalt;
+  if (!jwt) throw new Error('No token in D&D Beyond cobalt-token response');
+
+  // Decode JWT payload (no verification needed — we just need the userId claim)
+  let userId = '';
+  try {
+    const payload = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8')) as Record<string, unknown>;
+    console.log('JWT payload keys:', Object.keys(payload), '| sub:', payload['sub'], '| userId:', payload['userId']);
+    // DnD Beyond may use a namespaced claim or a numeric sub
+    userId = String(
+      payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier']
+      ?? payload['userId']
+      ?? payload['sub']
+      ?? ''
+    );
+  } catch (e) {
+    console.warn('Could not decode JWT payload to extract userId:', e);
+  }
+
+  console.log('Cobalt JWT obtained, userId:', userId);
+  return { jwt, userId };
 }
 
 function statMod(score: number): number {

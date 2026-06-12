@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { DndBeyondImportSection } from './DndBeyondImportSection';
+import { VarsEditor } from './VarsEditor';
 
 export default function CharacterPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,15 +22,20 @@ export default function CharacterPage() {
   const [charClass, setCharClass] = useState(char?.class ?? '');
   const [level, setLevel] = useState(char?.level ?? 1);
   const [notes, setNotes] = useState(char?.notes ?? '');
+
+  // vars: authoritative record written to the API on save
+  // varsEditorKey: incrementing key forces VarsEditor to remount when external data arrives
   const [vars, setVars] = useState<Record<string, number>>({});
-  const [varsJson, setVarsJson] = useState('');
+  const [varsIsValid, setVarsIsValid] = useState(true);
+  const [varsEditorKey, setVarsEditorKey] = useState(0);
+
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     charactersApi.getVars(id).then(v => {
       setVars(v);
-      setVarsJson(JSON.stringify(v, null, 2));
+      setVarsEditorKey(k => k + 1); // reset editor with loaded data
     }).catch(() => {});
   }, [id]);
 
@@ -39,15 +45,15 @@ export default function CharacterPage() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    if (!varsIsValid) {
+      toast({ title: 'Fix variable errors before saving', variant: 'destructive' });
+      return;
+    }
     setIsSaving(true);
     try {
-      // Parse vars JSON
-      let parsedVars: Record<string, number> = vars;
-      try { parsedVars = JSON.parse(varsJson); } catch { toast({ title: 'Invalid variables JSON', variant: 'destructive' }); setIsSaving(false); return; }
-
       await Promise.all([
         updateCharacter(char!.characterId, { name, class: charClass, level, notes }),
-        charactersApi.putVars(char!.characterId, parsedVars),
+        charactersApi.putVars(char!.characterId, vars),
       ]);
       toast({ title: 'Character saved' });
     } catch (err) {
@@ -96,19 +102,19 @@ export default function CharacterPage() {
             <CardTitle className="text-base">Variables</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="mb-2 text-xs text-muted-foreground">
-              JSON map of variable names → integer values. Used in macro notation as <code className="font-mono">{'{{varName}}'}</code>.
+            <p className="mb-3 text-xs text-muted-foreground">
+              Integer values referenced in macro notation as <code className="font-mono">{'{{varName}}'}</code>.
             </p>
-            <textarea
-              className="h-48 w-full rounded-md border bg-background px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              value={varsJson}
-              onChange={e => setVarsJson(e.target.value)}
+            <VarsEditor
+              key={varsEditorKey}
+              initialValue={vars}
+              onChange={(newVars, isValid) => { setVars(newVars); setVarsIsValid(isValid); }}
             />
           </CardContent>
         </Card>
 
         <div className="flex justify-end">
-          <Button type="submit" disabled={isSaving}>
+          <Button type="submit" disabled={isSaving || !varsIsValid}>
             <Save className="mr-1.5 h-4 w-4" />
             {isSaving ? 'Saving…' : 'Save changes'}
           </Button>
@@ -120,7 +126,7 @@ export default function CharacterPage() {
         characterId={char.characterId}
         onImported={updatedVars => {
           setVars(updatedVars);
-          setVarsJson(JSON.stringify(updatedVars, null, 2));
+          setVarsEditorKey(k => k + 1); // remount editor with imported vars
         }}
       />
     </div>

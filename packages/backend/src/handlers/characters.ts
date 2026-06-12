@@ -67,15 +67,22 @@ async function updateCharacter(event: APIGatewayProxyEventV2): Promise<APIGatewa
   const body = JSON.parse(event.body ?? '{}') as {
     name?: string; class?: string; level?: number; notes?: string;
   };
+
+  const setClauses: string[] = ['updatedAt = :now'];
+  const exprNames: Record<string, string> = {};
+  const exprValues: Record<string, unknown> = { ':now': new Date().toISOString() };
+
+  if (body.name  !== undefined) { setClauses.push('#n = :name');    exprNames['#n']  = 'name';  exprValues[':name']  = body.name; }
+  if (body.class !== undefined) { setClauses.push('#cl = :class');  exprNames['#cl'] = 'class'; exprValues[':class'] = body.class; }
+  if (body.level !== undefined) { setClauses.push('#lv = :level');  exprNames['#lv'] = 'level'; exprValues[':level'] = body.level; }
+  if (body.notes !== undefined) { setClauses.push('notes = :notes');                             exprValues[':notes'] = body.notes; }
+
   await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,
     Key: { pk: `USER#${userId}`, sk: `CHAR#${id}` },
-    UpdateExpression: 'SET #n = :name, #cl = :class, #lv = :level, notes = :notes, updatedAt = :now',
-    ExpressionAttributeNames: { '#n': 'name', '#cl': 'class', '#lv': 'level' },
-    ExpressionAttributeValues: {
-      ':name': body.name, ':class': body.class, ':level': body.level,
-      ':notes': body.notes, ':now': new Date().toISOString(),
-    },
+    UpdateExpression: `SET ${setClauses.join(', ')}`,
+    ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+    ExpressionAttributeValues: exprValues,
     ConditionExpression: 'attribute_exists(pk)',
   }));
   return ok({ characterId: id, ...body });

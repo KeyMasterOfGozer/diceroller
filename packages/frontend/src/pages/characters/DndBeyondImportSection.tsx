@@ -28,7 +28,8 @@ export function DndBeyondImportSection({ characterId, onImported }: Props) {
       setCharacters(chars);
       setPhase('picking');
     } catch (err) {
-      setError((err as Error).message ?? 'Could not load characters. Check your token and try again.');
+      const msg = (err as Error).message ?? '';
+      setError(msg || 'Could not load characters. Make sure you copied the full CobaltSession value and try again.');
       setPhase('idle');
     }
   }

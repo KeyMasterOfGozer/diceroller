@@ -35,6 +35,7 @@ export function notImplemented(): APIGatewayProxyResultV2 {
 }
 
 export function internalError(err?: unknown): APIGatewayProxyResultV2 {
+  const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
   console.error('Internal error:', err);
-  return { statusCode: 500, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Internal server error' }) };
+  return { statusCode: 500, headers: JSON_HEADERS, body: JSON.stringify({ error: `Internal error: ${message}` }) };
 }

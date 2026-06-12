@@ -2,7 +2,7 @@ import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { randomUUID } from 'crypto';
 import { docClient, TABLE_NAME, getUserId,
          GetCommand, PutCommand, QueryCommand, UpdateCommand, DeleteCommand,
-         TransactWriteCommand } from '../lib/db.js';
+         TransactWriteCommand, type QueryCommandInput } from '../lib/db.js';
 import { ok, created, noContent, badRequest, notFound, notImplemented, internalError } from '../lib/response.js';
 
 const VALID_CATEGORIES = ['Attack','Damage','Spell','Skill','Save','Utility','Other'] as const;
@@ -32,16 +32,16 @@ async function listMacros(event: APIGatewayProxyEventV2): Promise<APIGatewayProx
   const userId = getUserId(event);
   const { id: charId } = event.pathParameters ?? {};
   const category = event.queryStringParameters?.['category'];
-  const queryInput: Parameters<typeof docClient.send>[0] extends { input: infer I } ? never : Parameters<typeof QueryCommand>[0] = {
+  const queryInput: QueryCommandInput = {
     TableName: TABLE_NAME,
     KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
     ExpressionAttributeValues: { ':pk': `USER#${userId}#CHAR#${charId}`, ':prefix': 'MACRO#' },
   };
   if (category) {
-    (queryInput as Record<string, unknown>)['FilterExpression'] = 'category = :cat';
-    ((queryInput as Record<string, unknown>)['ExpressionAttributeValues'] as Record<string, unknown>)[':cat'] = category;
+    queryInput['FilterExpression'] = 'category = :cat';
+    (queryInput['ExpressionAttributeValues'] as Record<string, unknown>)[':cat'] = category;
   }
-  const result = await docClient.send(new QueryCommand(queryInput as Parameters<typeof QueryCommand>[0]));
+  const result = await docClient.send(new QueryCommand(queryInput));
   const items = (result.Items ?? []).map(stripKeys).sort((a, b) => ((a as Record<string, number>)['sortOrder'] ?? 0) - ((b as Record<string, number>)['sortOrder'] ?? 0));
   return ok(items);
 }
@@ -92,15 +92,24 @@ async function updateMacro(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
   if (body.category && !VALID_CATEGORIES.includes(body.category as never)) {
     return badRequest(`category must be one of: ${VALID_CATEGORIES.join(', ')}`);
   }
+
+  // Build update expression only for fields that were actually provided
+  const setClauses: string[] = ['updatedAt = :now'];
+  const exprNames: Record<string, string> = {};
+  const exprValues: Record<string, unknown> = { ':now': new Date().toISOString() };
+
+  if (body.name        !== undefined) { setClauses.push('#n = :name');            exprNames['#n'] = 'name'; exprValues[':name']     = body.name; }
+  if (body.notation    !== undefined) { setClauses.push('notation = :notation');  exprValues[':notation']  = body.notation; }
+  if (body.category    !== undefined) { setClauses.push('category = :cat');       exprValues[':cat']       = body.category; }
+  if (body.description !== undefined) { setClauses.push('description = :desc');   exprValues[':desc']      = body.description; }
+  if (body.sortOrder   !== undefined) { setClauses.push('sortOrder = :order');    exprValues[':order']     = body.sortOrder; }
+
   await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,
     Key: macroKey(userId, charId!, macroId!),
-    UpdateExpression: 'SET #n = :name, notation = :notation, category = :cat, description = :desc, sortOrder = :order, updatedAt = :now',
-    ExpressionAttributeNames: { '#n': 'name' },
-    ExpressionAttributeValues: {
-      ':name': body.name, ':notation': body.notation, ':cat': body.category,
-      ':desc': body.description, ':order': body.sortOrder, ':now': new Date().toISOString(),
-    },
+    UpdateExpression: `SET ${setClauses.join(', ')}`,
+    ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+    ExpressionAttributeValues: exprValues,
     ConditionExpression: 'attribute_exists(pk)',
   }));
   return ok({ macroId, ...body });
