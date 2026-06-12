@@ -105,6 +105,7 @@ export function VarsEditor({ initialValue, onChange }: Props) {
                       className={`h-7 font-mono text-xs ${row.keyError ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                       value={row.key}
                       onChange={e => updateKey(row.id, e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
                       placeholder="variable_name"
                       spellCheck={false}
                     />
@@ -119,6 +120,7 @@ export function VarsEditor({ initialValue, onChange }: Props) {
                       className={`h-7 font-mono text-xs text-right ${row.valueError ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                       value={row.value}
                       onChange={e => updateValue(row.id, e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && e.preventDefault()}
                       placeholder="0"
                     />
                     {row.valueError && (

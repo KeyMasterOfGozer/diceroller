@@ -18,13 +18,28 @@ export default function CharacterPage() {
   const { toast } = useToast();
 
   const char = characters.find(c => c.characterId === id);
-  const [name, setName] = useState(char?.name ?? '');
-  const [charClass, setCharClass] = useState(char?.class ?? '');
-  const [level, setLevel] = useState(char?.level ?? 1);
-  const [notes, setNotes] = useState(char?.notes ?? '');
+
+  // Form fields — initialized empty, synced from store once char is available.
+  // Using useEffect (not useState initializer) handles the case where the
+  // Zustand store loads asynchronously after the component mounts.
+  const [name, setName] = useState('');
+  const [charClass, setCharClass] = useState('');
+  const [level, setLevel] = useState(1);
+  const [notes, setNotes] = useState('');
+
+  // Sync detail fields whenever the character identity resolves or changes
+  useEffect(() => {
+    if (!char) return;
+    setName(char.name ?? '');
+    setCharClass(char.class ?? '');
+    setLevel(char.level ?? 1);
+    setNotes(char.notes ?? '');
+  // Only re-sync when navigating to a different character, not on every store update
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [char?.characterId]);
 
   // vars: authoritative record written to the API on save
-  // varsEditorKey: incrementing key forces VarsEditor to remount when external data arrives
+  // varsEditorKey: increment to force VarsEditor to remount with fresh data
   const [vars, setVars] = useState<Record<string, number>>({});
   const [varsIsValid, setVarsIsValid] = useState(true);
   const [varsEditorKey, setVarsEditorKey] = useState(0);
@@ -35,12 +50,12 @@ export default function CharacterPage() {
     if (!id) return;
     charactersApi.getVars(id).then(v => {
       setVars(v);
-      setVarsEditorKey(k => k + 1); // reset editor with loaded data
+      setVarsEditorKey(k => k + 1);
     }).catch(() => {});
   }, [id]);
 
   if (!char) {
-    return <p className="text-muted-foreground">Character not found.</p>;
+    return <p className="text-muted-foreground">Loading…</p>;
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -126,7 +141,7 @@ export default function CharacterPage() {
         characterId={char.characterId}
         onImported={updatedVars => {
           setVars(updatedVars);
-          setVarsEditorKey(k => k + 1); // remount editor with imported vars
+          setVarsEditorKey(k => k + 1);
         }}
       />
     </div>
