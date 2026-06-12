@@ -1,0 +1,25 @@
+{
+  "name": "@dnd-dice-roller/infra",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy:stateful": "cdk deploy DiceRollerStateful",
+    "deploy:app": "cdk deploy DiceRollerApp",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.258.0",
+    "constructs": "^10.5.0"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.258.0",
+    "esbuild": "^0.25.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.5.0"
+  }
+}
