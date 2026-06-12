@@ -114,13 +114,31 @@ export const sharingApi = {
 };
 
 // D&D Beyond
+export interface DdbCharacterClass {
+  name: string;
+  level: number;
+}
+
+export interface DdbCharacter {
+  id: number;
+  name: string;
+  race: string;
+  classes: DdbCharacterClass[];
+  avatarUrl: string | null;
+}
+
+export interface DdbImportResult {
+  imported: number;
+  vars: Record<string, number>;
+}
+
 export const dndBeyondApi = {
-  exchangeToken: (code: string, redirectUri: string) =>
-    request<{ accessToken: string; expiresIn: number }>(
-      'POST', '/dndbeyond/token', { code, redirectUri }
+  /** List characters using a Cobalt session token (from DnD Beyond cookies). */
+  listCharacters: (cobaltToken: string) =>
+    request<DdbCharacter[]>(`GET`, `/dndbeyond/characters?accessToken=${encodeURIComponent(cobaltToken)}`),
+  /** Import a DnD Beyond character's stats into a local character. */
+  importCharacter: (cobaltToken: string, dndCharacterId: number, targetCharacterId: string) =>
+    request<DdbImportResult>(
+      'POST', `/characters/${targetCharacterId}/import/dndbeyond/${dndCharacterId}`, { accessToken: cobaltToken }
     ),
-  listCharacters: (accessToken: string) =>
-    request<unknown[]>('GET', `/dndbeyond/characters?accessToken=${encodeURIComponent(accessToken)}`),
-  importCharacter: (accessToken: string, dndCharacterId: string, targetCharacterId: string) =>
-    request('POST', '/dndbeyond/import', { accessToken, dndCharacterId, targetCharacterId }),
 };

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
+import { DndBeyondImportSection } from './DndBeyondImportSection';
 
 export default function CharacterPage() {
   const { id } = useParams<{ id: string }>();
@@ -113,6 +114,15 @@ export default function CharacterPage() {
           </Button>
         </div>
       </form>
+
+      {/* D&D Beyond import */}
+      <DndBeyondImportSection
+        characterId={char.characterId}
+        onImported={updatedVars => {
+          setVars(updatedVars);
+          setVarsJson(JSON.stringify(updatedVars, null, 2));
+        }}
+      />
     </div>
   );
 }

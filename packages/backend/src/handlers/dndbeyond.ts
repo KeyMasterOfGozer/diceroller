@@ -17,10 +17,10 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   try {
     const { routeKey } = event;
     switch (routeKey) {
-      case 'POST /dndbeyond/token':       return exchangeToken(event);
-      case 'GET /dndbeyond/characters':   return listDndCharacters(event);
-      case 'POST /dndbeyond/import':      return importCharacter(event);
-      default:                            return notImplemented();
+      case 'POST /dndbeyond/token':                                          return exchangeToken(event);
+      case 'GET /dndbeyond/characters':                                      return listDndCharacters(event);
+      case 'POST /characters/{id}/import/dndbeyond/{ddbCharId}':            return importCharacter(event);
+      default:                                                               return notImplemented();
     }
   } catch (err) {
     return internalError(err);
@@ -109,26 +109,26 @@ async function listDndCharacters(event: APIGatewayProxyEventV2): Promise<APIGate
   return ok(characters);
 }
 
-/** POST /dndbeyond/import
+/** POST /characters/{id}/import/dndbeyond/{ddbCharId}
  *  Imports a D&D Beyond character into the dice roller.
- *  Body: { accessToken: string; dndCharacterId: string; targetCharacterId: string }
+ *  Path: id = local character ID, ddbCharId = D&D Beyond character ID
+ *  Body: { accessToken: string }
  *
  *  Extracts standard variable keys (stats, proficiency bonus, etc.) and overwrites
  *  the target character's vars. Custom variables are untouched.
  */
 async function importCharacter(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const userId = getUserId(event);
-  const body = JSON.parse(event.body ?? '{}') as {
-    accessToken?: string;
-    dndCharacterId?: string;
-    targetCharacterId?: string;
-  };
-  if (!body.accessToken) return badRequest('accessToken is required');
-  if (!body.dndCharacterId) return badRequest('dndCharacterId is required');
-  if (!body.targetCharacterId) return badRequest('targetCharacterId is required');
+  const targetCharacterId = event.pathParameters?.['id'];
+  const dndCharacterId    = event.pathParameters?.['ddbCharId'];
+  const body = JSON.parse(event.body ?? '{}') as { accessToken?: string };
+
+  if (!body.accessToken)    return badRequest('accessToken is required');
+  if (!targetCharacterId)   return badRequest('id path param is required');
+  if (!dndCharacterId)      return badRequest('ddbCharId path param is required');
 
   // Fetch full character from D&D Beyond
-  const response = await fetch(`${DNDBEYOND_API_BASE}/v5/character/${body.dndCharacterId}`, {
+  const response = await fetch(`${DNDBEYOND_API_BASE}/v5/character/${dndCharacterId}`, {
     headers: { 'Authorization': `Bearer ${body.accessToken}`, 'Accept': 'application/json' },
   });
 
@@ -165,7 +165,7 @@ async function importCharacter(event: APIGatewayProxyEventV2): Promise<APIGatewa
   // Fetch existing custom vars to merge (only overwrite standard keys)
   const existingResult = await docClient.send(new GetCommand({
     TableName: TABLE_NAME,
-    Key: { pk: `USER#${userId}`, sk: `VARS#${body.targetCharacterId}` },
+    Key: { pk: `USER#${userId}`, sk: `VARS#${targetCharacterId}` },
   }));
   const existingVars = (existingResult.Item?.['vars'] ?? {}) as Record<string, number>;
 
@@ -175,7 +175,7 @@ async function importCharacter(event: APIGatewayProxyEventV2): Promise<APIGatewa
   await docClient.send(new PutCommand({
     TableName: TABLE_NAME,
     Item: {
-      pk: `USER#${userId}`, sk: `VARS#${body.targetCharacterId}`,
+      pk: `USER#${userId}`, sk: `VARS#${targetCharacterId}`,
       vars: mergedVars, updatedAt: new Date().toISOString(),
     },
   }));
