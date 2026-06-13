@@ -3,7 +3,11 @@ import { cn } from '@/lib/utils';
 
 export function RollResultDisplay({ result }: { result: RollResult }) {
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2.5 animate-roll-in">
+    <div className={cn(
+      'mt-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2.5 animate-roll-in',
+      result.isNatural20 && 'border-green-500 dark:border-green-600',
+      result.isNatural1  && 'border-destructive',
+    )}>
       {result.components.map((comp, i) => (
         <div key={i} className="flex flex-col items-center min-w-[3rem]">
           {comp.label && (
@@ -46,16 +50,6 @@ export function RollResultDisplay({ result }: { result: RollResult }) {
           )}
         </div>
       ))}
-      {result.isNatural20 && (
-        <span className="ml-auto self-start rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700 dark:bg-green-900/40 dark:text-green-400">
-          NAT 20 ✦
-        </span>
-      )}
-      {result.isNatural1 && (
-        <span className="ml-auto self-start rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-destructive dark:bg-red-900/40">
-          NAT 1
-        </span>
-      )}
     </div>
   );
 }
