@@ -44,4 +44,24 @@ export interface RollOptions {
   variables?: VariableMap;
   /** Override the random source for testing */
   random?: (sides: number) => number;
+  /**
+   * Per-component crit override (index-aligned with macro.components).
+   * When true for a given index, dice in that component are doubled.
+   */
+  forceCritComponents?: boolean[];
+}
+
+/**
+ * Result of rollAttack() — the to-hit and damage rolls are kept separate so
+ * callers can display them distinctly and apply the crit flag to damage only.
+ */
+export interface AttackRollResult {
+  /** The to-hit roll (first component of the notation). */
+  toHit: RollResult;
+  /** Damage rolls (remaining components). Null if notation has only one component. */
+  damage: RollResult | null;
+  /** True when the to-hit roll was a natural 20. */
+  isCrit: boolean;
+  /** True when the to-hit roll was a natural 1. */
+  isFumble: boolean;
 }

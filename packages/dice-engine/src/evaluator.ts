@@ -175,8 +175,9 @@ export function evaluate(macro: MacroNode, options: RollOptions = {}): RollResul
   }
 
   // ── Evaluate each component ───────────────────────────────────────────────
-  const components: RollComponent[] = macro.components.map(c => {
-    const result = rollDice(c.expr, false);
+  const components: RollComponent[] = macro.components.map((c, i) => {
+    const forceCrit = options.forceCritComponents?.[i] ?? false;
+    const result = rollDice(c.expr, forceCrit);
     // Walk the expr tree to accumulate dice vs flat modifier
     const { dice, subtotal, modifier, isCrit } = result;
     return {

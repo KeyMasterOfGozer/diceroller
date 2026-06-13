@@ -4,7 +4,7 @@ import {
   Plus, Settings, Dices, Trash2, Share2, Pencil, Check, X,
   GripVertical, Copy, Link2Off, Layers,
 } from 'lucide-react';
-import { roll, validate, type RollResult } from '@dnd-dice-roller/dice-engine';
+import { roll, rollAttack, validate, type RollResult, type AttackRollResult } from '@dnd-dice-roller/dice-engine';
 import { useCharactersStore } from '@/store/characters';
 import { macrosApi, charactersApi, sharingApi, type Macro } from '@/lib/api';
 import { addRoll, getRollHistory, type RollHistoryEntry } from '@/lib/db';
@@ -53,15 +53,23 @@ function CategorySelect({ value, onChange, id }: { value: string; onChange: (v: 
   );
 }
 
+// ── Combo result entry — mirrors standalone macro variants ────────────────────
+
+type ComboEntry =
+  | { kind: 'roll';   macroName: string; result: RollResult }
+  | { kind: 'attack'; macroName: string; atkResult: AttackRollResult };
+
 // ── History grouping ──────────────────────────────────────────────────────────
 
 type HistoryGroup =
   | { kind: 'single'; entry: RollHistoryEntry }
-  | { kind: 'combo'; comboId: string; comboName: string; entries: RollHistoryEntry[]; rolledAt: Date };
+  | { kind: 'combo'; comboId: string; comboName: string; entries: RollHistoryEntry[]; rolledAt: Date }
+  | { kind: 'attack'; attackId: string; attackName: string; toHit: RollHistoryEntry; damage: RollHistoryEntry | null; isCrit: boolean; rolledAt: Date };
 
 function groupHistory(entries: RollHistoryEntry[]): HistoryGroup[] {
   const groups: HistoryGroup[] = [];
-  const seenCombos = new Set<string>();
+  const seenCombos  = new Set<string>();
+  const seenAttacks = new Set<string>();
   for (const entry of entries) {
     if (entry.comboId) {
       if (!seenCombos.has(entry.comboId)) {
@@ -71,6 +79,22 @@ function groupHistory(entries: RollHistoryEntry[]): HistoryGroup[] {
           comboId: entry.comboId,
           comboName: entry.comboName ?? 'Combo',
           entries: entries.filter(e => e.comboId === entry.comboId),
+          rolledAt: entry.rolledAt,
+        });
+      }
+    } else if (entry.attackId) {
+      if (!seenAttacks.has(entry.attackId)) {
+        seenAttacks.add(entry.attackId);
+        const attackEntries = entries.filter(e => e.attackId === entry.attackId);
+        const toHit  = attackEntries.find(e => e.attackPart === 'to-hit') ?? entry;
+        const damage = attackEntries.find(e => e.attackPart === 'damage') ?? null;
+        groups.push({
+          kind: 'attack',
+          attackId: entry.attackId,
+          attackName: entry.attackName ?? 'Attack',
+          toHit,
+          damage,
+          isCrit: toHit.result.isNatural20,
           rolledAt: entry.rolledAt,
         });
       }
@@ -200,9 +224,10 @@ export default function MacrosPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   // Roll results
-  const [macroResults, setMacroResults] = useState<Record<string, RollResult>>({});
-  const [comboResults, setComboResults] = useState<Record<string, { macroName: string; result: RollResult }[]>>({});
-  const [lastRollKey, setLastRollKey] = useState<string | null>(null);
+  const [macroResults, setMacroResults]   = useState<Record<string, RollResult>>({});
+  const [attackResults, setAttackResults] = useState<Record<string, AttackRollResult>>({});
+  const [comboResults, setComboResults] = useState<Record<string, ComboEntry[]>>({});
+  const [lastRollKey, setLastRollKey]     = useState<string | null>(null);
 
   // Drag-to-reorder
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -335,6 +360,39 @@ export default function MacrosPage() {
 
   async function handleRoll(macro: Macro) {
     try {
+      // Attack category macros get the crit-aware two-phase roll
+      if (macro.category === 'Attack') {
+        const atkResult = rollAttack(macro.notation, { variables: vars });
+        const unresolved = [
+          ...atkResult.toHit.unresolvedVariables,
+          ...(atkResult.damage?.unresolvedVariables ?? []),
+        ].filter((v, i, a) => a.indexOf(v) === i);
+        if (unresolved.length > 0) {
+          toast({ title: 'Unresolved variables', description: `Missing: ${unresolved.join(', ')}`, variant: 'destructive' });
+        }
+        const attackId = crypto.randomUUID();
+        const rolledAt = new Date();
+        // Store to-hit entry
+        await addRoll({
+          characterId: charId!, notation: macro.notation,
+          result: atkResult.toHit, rolledAt,
+          attackId, attackPart: 'to-hit', attackName: macro.name,
+        });
+        // Store damage entry (if there are damage components)
+        if (atkResult.damage) {
+          await addRoll({
+            characterId: charId!, notation: macro.notation,
+            result: atkResult.damage, rolledAt,
+            attackId, attackPart: 'damage', attackName: macro.name,
+          });
+        }
+        setLastRollKey('attack-' + attackId);
+        setAttackResults(prev => ({ ...prev, [macro.macroId]: atkResult }));
+        setHistory(await getRollHistory(charId!, 30));
+        return;
+      }
+
+      // Standard roll
       const result = roll(macro.notation, { variables: vars });
       if (result.unresolvedVariables.length > 0) {
         toast({
@@ -357,24 +415,43 @@ export default function MacrosPage() {
     if (ids.length === 0) return;
     const comboId = crypto.randomUUID();
     const rolledAt = new Date();
-    const results: { macroName: string; result: RollResult }[] = [];
+    const results: ComboEntry[] = [];
 
-    for (const macroId of ids) {
-      const m = macros.find(x => x.macroId === macroId);
-      if (!m || m.type === 'combo') continue; // skip missing / nested combos
+    // Resolve valid macros in order (skip missing / nested combos)
+    const validMacros = ids
+      .map(id => macros.find(x => x.macroId === id))
+      .filter((m): m is Macro => !!m && (m.type ?? 'standard') !== 'combo');
+
+    // Each macro in the combo is rolled exactly like a standalone macro:
+    // Attack macros use rollAttack() (crit within their own components), others use roll().
+    for (const m of validMacros) {
       try {
-        const result = roll(m.notation, { variables: vars });
-        results.push({ macroName: m.name, result });
-        await addRoll({
-          characterId: charId!,
-          notation: m.notation,
-          result,
-          rolledAt,
-          macroName: m.name,
-          comboId,
-          comboName: combo.name,
-        });
-        setMacroResults(prev => ({ ...prev, [macroId]: result }));
+        if (m.category === 'Attack') {
+          const atkResult = rollAttack(m.notation, { variables: vars });
+          results.push({ kind: 'attack', macroName: m.name, atkResult });
+          // Store to-hit and (if present) damage as separate history rows in this combo
+          await addRoll({
+            characterId: charId!, notation: m.notation, result: atkResult.toHit,
+            rolledAt, macroName: `${m.name} — Hit`, comboId, comboName: combo.name,
+          });
+          if (atkResult.damage) {
+            await addRoll({
+              characterId: charId!, notation: m.notation, result: atkResult.damage,
+              rolledAt,
+              macroName: `${m.name} — ${atkResult.isCrit ? 'Dmg ✕2' : 'Dmg'}`,
+              comboId, comboName: combo.name,
+            });
+          }
+          setAttackResults(prev => ({ ...prev, [m.macroId]: atkResult }));
+        } else {
+          const result = roll(m.notation, { variables: vars });
+          results.push({ kind: 'roll', macroName: m.name, result });
+          await addRoll({
+            characterId: charId!, notation: m.notation, result,
+            rolledAt, macroName: m.name, comboId, comboName: combo.name,
+          });
+          setMacroResults(prev => ({ ...prev, [m.macroId]: result }));
+        }
       } catch {
         // silently skip a broken constituent
       }
@@ -509,7 +586,7 @@ export default function MacrosPage() {
                   <Input
                     id="macro-notation" required
                     value={newNotation} onChange={e => handleNewNotationChange(e.target.value)}
-                    placeholder="1d20+{{prof}}+{{str}} [To Hit]; 1d8+{{str}} [Damage]"
+                    placeholder={newCategory === 'Attack' ? '1d20+{{prof}}+{{str}} [To Hit]; 1d8+{{str}} [Damage]' : '2d6+{{str}}'}
                     className={cn(notationError && 'border-destructive focus-visible:ring-destructive')}
                   />
                   {notationError && <p className="text-xs text-destructive">{notationError}</p>}
@@ -750,20 +827,76 @@ export default function MacrosPage() {
                             </div>
                           </div>
 
+                          {/* Attack macro result — to-hit and damage on one line */}
+                          {!isCombo && macro.category === 'Attack' && attackResults[macro.macroId] && (() => {
+                            const atk = attackResults[macro.macroId];
+                            return (
+                              <div className="mt-3 space-y-2">
+                                {/* Crit / fumble banner */}
+                                {atk.isCrit && (
+                                  <div className="rounded-md bg-green-100 px-3 py-1 text-center text-sm font-bold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+                                    ⚔ CRITICAL HIT!
+                                  </div>
+                                )}
+                                {atk.isFumble && (
+                                  <div className="rounded-md bg-red-100 px-3 py-1 text-center text-sm font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                    💀 FUMBLE!
+                                  </div>
+                                )}
+                                {/* To-hit and damage side by side */}
+                                <div className="flex gap-4 flex-wrap">
+                                  <div className="min-w-0">
+                                    <RollResultDisplay result={atk.toHit} />
+                                  </div>
+                                  {atk.damage && (
+                                    <div className="min-w-0">
+                                      <RollResultDisplay result={atk.damage} />
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+
                           {/* Standard macro roll result */}
-                          {!isCombo && macroResults[macro.macroId] && (
+                          {!isCombo && macro.category !== 'Attack' && macroResults[macro.macroId] && (
                             <RollResultDisplay result={macroResults[macro.macroId]} />
                           )}
 
-                          {/* Combo roll results — one block per constituent */}
+                          {/* Combo roll results — each macro handled same as standalone */}
                           {isCombo && comboResults[macro.macroId] && (
                             <div className="mt-3 space-y-2">
-                              {comboResults[macro.macroId].map(({ macroName, result }, i) => (
+                              {comboResults[macro.macroId].map((entry, i) => (
                                 <div key={i}>
                                   <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                    {macroName}
+                                    {entry.macroName}
                                   </p>
-                                  <RollResultDisplay result={result} />
+                                  {entry.kind === 'attack' ? (
+                                    <div className="space-y-1">
+                                      {entry.atkResult.isCrit && (
+                                        <div className="rounded-md bg-green-100 px-2 py-0.5 text-center text-xs font-bold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+                                          ⚔ CRITICAL HIT!
+                                        </div>
+                                      )}
+                                      {entry.atkResult.isFumble && (
+                                        <div className="rounded-md bg-red-100 px-2 py-0.5 text-center text-xs font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                          💀 FUMBLE!
+                                        </div>
+                                      )}
+                                      <div className="flex gap-4 flex-wrap">
+                                        <div>
+                                          <RollResultDisplay result={entry.atkResult.toHit} />
+                                        </div>
+                                        {entry.atkResult.damage && (
+                                          <div>
+                                            <RollResultDisplay result={entry.atkResult.damage} />
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <RollResultDisplay result={entry.result} />
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -823,6 +956,78 @@ export default function MacrosPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                );
+              }
+
+              // Attack roll group
+              if (group.kind === 'attack') {
+                const isNew = lastRollKey === 'attack-' + group.attackId;
+                const { toHit, damage, isCrit } = group;
+                return (
+                  <div
+                    key={group.attackId}
+                    className={cn(
+                      'rounded-md border overflow-hidden transition-colors',
+                      isNew && 'animate-roll-in border-primary/30 bg-primary/5',
+                    )}
+                  >
+                    {/* Attack header */}
+                    <div className="flex items-center justify-between gap-2 border-b bg-muted/50 px-3 py-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs">⚔</span>
+                        <span className="text-xs font-semibold">{group.attackName}</span>
+                        {isCrit && (
+                          <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-bold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+                            CRIT
+                          </span>
+                        )}
+                        {toHit.result.isNatural1 && (
+                          <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                            FUMBLE
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">{formatDate(group.rolledAt)}</span>
+                    </div>
+                    {/* To-hit and damage on one row */}
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 py-2">
+                      {/* To Hit section */}
+                      <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          {toHit.result.components.map((comp, ci) => (
+                            <div key={ci} className="flex items-center gap-1">
+                              {comp.label && <span className="text-xs text-muted-foreground">{comp.label}</span>}
+                              <span className={cn(
+                                'text-lg font-bold tabular-nums leading-none',
+                                isCrit && 'text-green-600 dark:text-green-400',
+                                toHit.result.isNatural1 && 'text-destructive',
+                              )}>
+                                {comp.subtotal}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {/* Damage section */}
+                      {damage && (
+                        <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap gap-2">
+                            {damage.result.components.map((comp, ci) => (
+                              <div key={ci} className="flex items-center gap-1">
+                                {comp.label && <span className="text-xs text-muted-foreground">{comp.label}</span>}
+                                <span className={cn(
+                                  'text-lg font-bold tabular-nums leading-none',
+                                  isCrit && 'text-green-600 dark:text-green-400',
+                                )}>
+                                  {comp.subtotal}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               }

@@ -13,6 +13,10 @@ export interface RollHistoryEntry {
   macroName?: string;   // display name of the individual macro
   comboId?: string;     // shared UUID that groups all rolls from one combo trigger
   comboName?: string;   // display name of the combo macro
+  // Attack grouping — set on both to-hit and damage rolls of an attack macro
+  attackId?: string;    // shared UUID that groups the to-hit + damage rolls
+  attackPart?: 'to-hit' | 'damage'; // which part of the attack this entry represents
+  attackName?: string;  // display name of the attack macro
 }
 
 export interface UserPrefs {
