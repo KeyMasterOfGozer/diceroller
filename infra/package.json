@@ -7,9 +7,9 @@
     "cdk": "cdk",
     "synth": "cdk synth",
     "diff": "cdk diff",
-    "deploy:stateful": "cdk deploy DiceRollerStateful",
-    "deploy:app": "cdk deploy DiceRollerApp",
-    "deploy": "cdk deploy --all",
+    "deploy:stateful": "node scripts/deploy.mjs DiceRollerStateful --require-approval never",
+    "deploy:app": "node scripts/deploy.mjs DiceRollerApp --require-approval never",
+    "deploy": "node scripts/deploy.mjs --all --require-approval never",
     "destroy": "cdk destroy --all"
   },
   "dependencies": {
