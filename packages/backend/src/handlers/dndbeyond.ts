@@ -275,6 +275,28 @@ function computeTotalLevel(char: Record<string, unknown>): number {
 }
 
 function computeProficiencyBonus(char: Record<string, unknown>): number {
+  // DDB sometimes exposes the already-computed value at the top level
+  if (typeof char['proficiencyBonus'] === 'number') {
+    return char['proficiencyBonus'] as number;
+  }
+
   const level = computeTotalLevel(char);
-  return Math.ceil(level / 4) + 1;
+  const base = Math.ceil(level / 4) + 1;
+
+  // Apply any proficiency-bonus modifiers (e.g., certain magic items or features)
+  type DdbModifier = { type: string; subType: string; value: number | null };
+  const modifiersMap = (char['modifiers'] as Record<string, DdbModifier[]> | undefined) ?? {};
+  const allModifiers: DdbModifier[] = Object.values(modifiersMap).flat();
+
+  const modBonus = allModifiers
+    .filter(m => m.type === 'bonus' && m.subType === 'proficiency-bonus')
+    .reduce((sum, m) => sum + (m.value ?? 0), 0);
+
+  // 'set' overrides (take the max of base+bonuses vs any set value)
+  const setValues = allModifiers
+    .filter(m => m.type === 'set' && m.subType === 'proficiency-bonus' && m.value != null)
+    .map(m => m.value!);
+
+  const computed = base + modBonus;
+  return setValues.length > 0 ? Math.max(computed, ...setValues) : computed;
 }
