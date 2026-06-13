@@ -9,6 +9,10 @@ export interface RollHistoryEntry {
   notation: string;
   result: RollResult;
   rolledAt: Date;
+  // Combo grouping — set on every constituent roll of a combo
+  macroName?: string;   // display name of the individual macro
+  comboId?: string;     // shared UUID that groups all rolls from one combo trigger
+  comboName?: string;   // display name of the combo macro
 }
 
 export interface UserPrefs {

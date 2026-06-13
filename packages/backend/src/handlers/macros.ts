@@ -52,22 +52,34 @@ async function createMacro(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
   const body = JSON.parse(event.body ?? '{}') as {
     name?: string; notation?: string; category?: string;
     description?: string; sortOrder?: number;
+    type?: 'standard' | 'combo'; macroIds?: string[];
   };
+
   if (!body.name?.trim()) return badRequest('name is required');
-  if (!body.notation?.trim()) return badRequest('notation is required');
   if (body.category && !VALID_CATEGORIES.includes(body.category as never)) {
     return badRequest(`category must be one of: ${VALID_CATEGORIES.join(', ')}`);
   }
-  // TODO: validate notation via dice-engine validate() before saving
+
+  const macroType = body.type ?? 'standard';
+  if (macroType === 'combo') {
+    if (!body.macroIds?.length) return badRequest('macroIds (non-empty array) is required for combo macros');
+  } else {
+    if (!body.notation?.trim()) return badRequest('notation is required');
+  }
+
   const macroId = randomUUID();
   const now = new Date().toISOString();
   const item = {
     pk: `USER#${userId}#CHAR#${charId}`, sk: `MACRO#${macroId}`,
     macroId, characterId: charId, userId,
-    name: body.name.trim(), notation: body.notation.trim(),
+    name: body.name.trim(),
+    notation: macroType === 'combo' ? '' : (body.notation?.trim() ?? ''),
     category: body.category ?? 'Utility', description: body.description ?? '',
     isShared: false, shareToken: null,
-    sortOrder: body.sortOrder ?? 0, createdAt: now, updatedAt: now,
+    sortOrder: body.sortOrder ?? 0,
+    type: macroType,
+    macroIds: macroType === 'combo' ? (body.macroIds ?? []) : [],
+    createdAt: now, updatedAt: now,
   };
   await docClient.send(new PutCommand({ TableName: TABLE_NAME, Item: item }));
   return created(stripKeys(item));
@@ -88,6 +100,7 @@ async function updateMacro(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
   const { id: charId, macroId } = event.pathParameters ?? {};
   const body = JSON.parse(event.body ?? '{}') as {
     name?: string; notation?: string; category?: string; description?: string; sortOrder?: number;
+    macroIds?: string[];
   };
   if (body.category && !VALID_CATEGORIES.includes(body.category as never)) {
     return badRequest(`category must be one of: ${VALID_CATEGORIES.join(', ')}`);
@@ -103,6 +116,7 @@ async function updateMacro(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
   if (body.category    !== undefined) { setClauses.push('category = :cat');       exprValues[':cat']       = body.category; }
   if (body.description !== undefined) { setClauses.push('description = :desc');   exprValues[':desc']      = body.description; }
   if (body.sortOrder   !== undefined) { setClauses.push('sortOrder = :order');    exprValues[':order']     = body.sortOrder; }
+  if (body.macroIds    !== undefined) { setClauses.push('macroIds = :ids');       exprValues[':ids']       = body.macroIds; }
 
   await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,

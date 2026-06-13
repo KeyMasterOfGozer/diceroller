@@ -63,6 +63,8 @@ export interface Macro {
   isShared: boolean;
   shareToken: string | null;
   sortOrder: number;
+  type: 'standard' | 'combo';
+  macroIds: string[];   // ordered list of constituent macroIds; only meaningful for type='combo'
   createdAt: string;
   updatedAt: string;
 }
@@ -112,8 +114,10 @@ export const sharingApi = {
     request<void>('DELETE', `/characters/${charId}/macros/${macroId}/share`),
   getShared: (token: string) =>
     request<Macro>('GET', `/shared/${token}`, undefined, false),
-  importShared: (charId: string, macroId: string, shareToken: string) =>
-    request<Macro>('POST', `/characters/${charId}/macros/${macroId}/import-share`, { shareToken }),
+  // Note: macroId in the path is required for API Gateway routing but the backend
+  // ignores it and generates its own UUID for the new macro.
+  importShared: (charId: string, shareToken: string) =>
+    request<Macro>('POST', `/characters/${charId}/macros/${crypto.randomUUID()}/import-share`, { shareToken }),
 };
 
 // D&D Beyond
