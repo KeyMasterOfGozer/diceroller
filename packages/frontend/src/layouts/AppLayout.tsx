@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Dices, User, LogOut, Menu, X, Plus } from 'lucide-react';
+import { Dices, User, LogOut, Menu, X, Plus, Settings } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { useCharactersStore } from '@/store/characters';
 import { Button } from '@/components/ui/button';
@@ -160,6 +160,11 @@ export default function AppLayout() {
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem disabled className="text-xs text-muted-foreground">
                 {user?.email}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => navigate('/profile')}>
+                <Settings className="mr-2 h-4 w-4" />
+                Profile &amp; settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="text-destructive">

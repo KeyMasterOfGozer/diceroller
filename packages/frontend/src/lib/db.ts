@@ -76,6 +76,14 @@ export async function clearCharacterHistory(characterId: string): Promise<void> 
   await db.rollHistory.where('characterId').equals(characterId).delete();
 }
 
+export async function clearAllHistory(): Promise<void> {
+  await db.rollHistory.clear();
+}
+
+export async function getTotalHistoryCount(): Promise<number> {
+  return db.rollHistory.count();
+}
+
 export async function getPrefs(): Promise<UserPrefs> {
   const prefs = await db.prefs.toCollection().first();
   return prefs ?? { historyLimitPerCharacter: 500 };

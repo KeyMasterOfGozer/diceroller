@@ -10,6 +10,7 @@ import CharactersPage from '@/pages/characters/CharactersPage';
 import CharacterPage from '@/pages/characters/CharacterPage';
 import MacrosPage from '@/pages/macros/MacrosPage';
 import SharedMacroPage from '@/pages/shared/SharedMacroPage';
+import ProfilePage from '@/pages/profile/ProfilePage';
 import NotFoundPage from '@/pages/NotFoundPage';
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ export const router = createBrowserRouter([
       { path: 'characters', element: <CharactersPage /> },
       { path: 'characters/:id', element: <CharacterPage /> },
       { path: 'characters/:id/macros', element: <MacrosPage /> },
+      { path: 'profile', element: <ProfilePage /> },
     ],
   },
   // Auth routes (no auth required)
