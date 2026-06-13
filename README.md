@@ -149,6 +149,72 @@ This is the primary way to combine an attack roll and damage roll into one macro
 
 ---
 
+## Macro Categories
+
+Each macro has a **category** that controls how it's rolled.
+
+### Attack Macros
+
+Set a macro's category to **Attack** to enable the automatic crit mechanic:
+
+- The **first component** is the to-hit roll (`d20 + modifiers`).
+- If that d20 is a **natural 20**, every remaining component automatically rolls as a critical hit — dice are doubled, flat modifiers are not.
+- If the d20 is a **natural 1** (fumble), the result box gets a red border.
+- A natural 20 gets a green border.
+- To-hit and damage results are shown side by side on one line.
+
+```
+1d20 + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Slashing]; 1d6 [Fire]
+```
+
+On a nat-20, the engine automatically doubles the damage dice — you never need to manually call `crit()` inside an Attack macro's damage components.
+
+### Combo Macros
+
+Combo macros trigger multiple macros with one click — useful for two-weapon fighting, spells with rider effects, etc.
+
+Each constituent macro in a combo is handled **exactly** like a standalone macro:
+
+- Attack macros check their own d20 result and crit applies only to that macro's own damage components.
+- Non-Attack macros are rolled normally.
+- There is no cross-macro crit propagation.
+
+---
+
+## D&D Beyond Import
+
+Import a character directly from D&D Beyond using a **Cobalt session token**:
+
+1. Log in to D&D Beyond in your browser.
+2. Open DevTools → Application → Cookies → find the cookie named `CobaltSession`.
+3. Copy the value and paste it into the import dialog.
+
+The importer reads your character's **current modified stat values**, including base scores, racial bonuses, Ability Score Improvements, feat bonuses (e.g., Resilient, Athlete), and any other active modifiers. It derives the ability modifiers (`str_mod`, `dex_mod`, etc.) and sets `prof` based on your character level.
+
+---
+
+## Roll History
+
+Every roll is saved locally in IndexedDB and shown in the history panel on the Macros page.
+
+- **Single rolls** — appear as individual entries.
+- **Attack macro rolls** — to-hit and damage are grouped in one history card, shown side by side, with CRIT or FUMBLE badges on the header.
+- **Combo rolls** — all macros from one combo trigger are grouped under the combo name.
+
+History is stored per character up to a configurable limit (default 500 entries). Older entries are trimmed automatically when the limit is exceeded.
+
+---
+
+## Profile & Settings
+
+Accessible from the user menu (top-right avatar → **Profile & settings**):
+
+- **Change password** — enter your current password and a new one (min 8 characters).
+- **History limit** — set how many roll entries are kept per character (10 – 10,000).
+- **Clear all history** — permanently removes all roll history from local storage on this device.
+
+---
+
 ## Practical Examples
 
 ### Basic Attack
@@ -156,6 +222,7 @@ This is the primary way to combine an attack roll and damage roll into one macro
 ```
 1d20 + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Damage]
 ```
+Set category to **Attack**. Crits auto-double the damage dice.
 
 ### Ranged Attack (Advantage)
 
@@ -163,17 +230,12 @@ This is the primary way to combine an attack roll and damage roll into one macro
 d20adv + {{prof}} + {{dex_mod}} [To Hit]; 1d8 + {{dex_mod}} [Piercing]
 ```
 
-### Flaming Sword
+### Flaming Sword (multi-damage-type)
 
 ```
 1d20 + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Slashing]; 1d6 [Fire]
 ```
-
-### Sneak Attack Critical
-
-```
-crit(1d8+3) [Damage]; crit(4d6) [Sneak Attack]
-```
+Set category to **Attack**. Both damage components double on a crit.
 
 ### Ability Check
 
@@ -214,7 +276,7 @@ d20dis + {{con_mod}} [CON Save]
 - **Auth** — Amazon Cognito (email/password, SRP)
 - **Hosting** — S3 + CloudFront + Route53 custom domain
 - **Infrastructure** — AWS CDK v2 (TypeScript), two-stack pattern (stateful + app)
-- **Roll history** — Dexie.js (IndexedDB), 500 rolls per character stored locally
+- **Roll history** — Dexie.js (IndexedDB), configurable limit per character (default 500)
 
 ## Development
 
