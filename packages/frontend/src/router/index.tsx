@@ -11,6 +11,7 @@ import CharacterPage from '@/pages/characters/CharacterPage';
 import MacrosPage from '@/pages/macros/MacrosPage';
 import SharedMacroPage from '@/pages/shared/SharedMacroPage';
 import ProfilePage from '@/pages/profile/ProfilePage';
+import DdbCallbackPage from '@/pages/ddb/DdbCallbackPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ export const router = createBrowserRouter([
       { path: 'characters/:id', element: <CharacterPage /> },
       { path: 'characters/:id/macros', element: <MacrosPage /> },
       { path: 'profile', element: <ProfilePage /> },
+      { path: 'ddb-callback', element: <DdbCallbackPage /> },
     ],
   },
   // Auth routes (no auth required)
