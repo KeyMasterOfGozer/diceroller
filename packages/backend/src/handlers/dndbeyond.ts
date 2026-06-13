@@ -218,17 +218,52 @@ function statMod(score: number): number {
 interface StatBlock { str: number; dex: number; con: number; int: number; wis: number; cha: number; }
 
 function extractStats(char: Record<string, unknown>): StatBlock {
-  const stats = (char['stats'] as Array<{ id: number; value: number }> | undefined) ?? [];
-  // DDB stat IDs: 1=STR,2=DEX,3=CON,4=INT,5=WIS,6=CHA
-  const bonuses = (char['bonusStats'] as Array<{ id: number; value: number | null }> | undefined) ?? [];
-  const overrides = (char['overrideStats'] as Array<{ id: number; value: number | null }> | undefined) ?? [];
+  // DDB stat IDs: 1=STR, 2=DEX, 3=CON, 4=INT, 5=WIS, 6=CHA
+  const baseStats     = (char['stats']         as Array<{ id: number; value: number | null }> | undefined) ?? [];
+  const bonusStats    = (char['bonusStats']     as Array<{ id: number; value: number | null }> | undefined) ?? [];
+  const overrideStats = (char['overrideStats']  as Array<{ id: number; value: number | null }> | undefined) ?? [];
+
+  // Gather all modifiers from every source: race, class, background, feat, item, condition, …
+  type DdbModifier = { type: string; subType: string; value: number | null };
+  const modifiersMap = (char['modifiers'] as Record<string, DdbModifier[]> | undefined) ?? {};
+  const allModifiers: DdbModifier[] = Object.values(modifiersMap).flat();
+
+  // DDB modifier subType strings for each ability score
+  const statSubType: Record<number, string> = {
+    1: 'strength-score',
+    2: 'dexterity-score',
+    3: 'constitution-score',
+    4: 'intelligence-score',
+    5: 'wisdom-score',
+    6: 'charisma-score',
+  };
 
   function getStat(id: number): number {
-    const override = overrides.find(s => s.id === id);
+    // Manual override (set via DDB UI) takes full precedence
+    const override = overrideStats.find(s => s.id === id);
     if (override?.value != null) return override.value;
-    const base = stats.find(s => s.id === id)?.value ?? 10;
-    const bonus = bonuses.find(s => s.id === id)?.value ?? 0;
-    return base + bonus;
+
+    const subType = statSubType[id];
+
+    // Base rolled/assigned score
+    const base = baseStats.find(s => s.id === id)?.value ?? 10;
+
+    // Manual bonus adjustment entered in DDB UI
+    const manualBonus = bonusStats.find(s => s.id === id)?.value ?? 0;
+
+    // Sum all 'bonus' modifiers: racial bonuses, class ASIs, feat bonuses, item bonuses, etc.
+    const modBonus = allModifiers
+      .filter(m => m.type === 'bonus' && m.subType === subType)
+      .reduce((sum, m) => sum + (m.value ?? 0), 0);
+
+    const raw = base + manualBonus + modBonus;
+
+    // 'set' modifiers (e.g., Gauntlets of Ogre Power set STR to 19 if it would be lower)
+    const setValues = allModifiers
+      .filter(m => m.type === 'set' && m.subType === subType && m.value != null)
+      .map(m => m.value!);
+
+    return setValues.length > 0 ? Math.max(raw, ...setValues) : raw;
   }
 
   return { str: getStat(1), dex: getStat(2), con: getStat(3), int: getStat(4), wis: getStat(5), cha: getStat(6) };
