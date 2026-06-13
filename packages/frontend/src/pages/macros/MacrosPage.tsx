@@ -59,6 +59,31 @@ type ComboEntry =
   | { kind: 'roll';   macroName: string; result: RollResult }
   | { kind: 'attack'; macroName: string; atkResult: AttackRollResult };
 
+// ── Combo-entry grouping (pairs attack to-hit + damage within a combo) ────────
+
+type ComboHistoryItem =
+  | { kind: 'roll';   entry: RollHistoryEntry }
+  | { kind: 'attack'; attackId: string; macroName: string; toHit: RollHistoryEntry; damage: RollHistoryEntry | null; isCrit: boolean };
+
+function groupComboEntries(entries: RollHistoryEntry[]): ComboHistoryItem[] {
+  const items: ComboHistoryItem[] = [];
+  const seenAttacks = new Set<string>();
+  for (const entry of entries) {
+    if (entry.attackId) {
+      if (!seenAttacks.has(entry.attackId)) {
+        seenAttacks.add(entry.attackId);
+        const attackEntries = entries.filter(e => e.attackId === entry.attackId);
+        const toHit  = attackEntries.find(e => e.attackPart === 'to-hit') ?? entry;
+        const damage = attackEntries.find(e => e.attackPart === 'damage') ?? null;
+        items.push({ kind: 'attack', attackId: entry.attackId, macroName: entry.attackName ?? entry.macroName ?? 'Attack', toHit, damage, isCrit: toHit.result.isNatural20 });
+      }
+    } else {
+      items.push({ kind: 'roll', entry });
+    }
+  }
+  return items;
+}
+
 // ── History grouping ──────────────────────────────────────────────────────────
 
 type HistoryGroup =
@@ -429,17 +454,19 @@ export default function MacrosPage() {
         if (m.category === 'Attack') {
           const atkResult = rollAttack(m.notation, { variables: vars });
           results.push({ kind: 'attack', macroName: m.name, atkResult });
-          // Store to-hit and (if present) damage as separate history rows in this combo
+          // Store to-hit + damage with both comboId AND attackId so the history
+          // renderer can pair them on one line within the combo group.
+          const attackId = crypto.randomUUID();
           await addRoll({
             characterId: charId!, notation: m.notation, result: atkResult.toHit,
-            rolledAt, macroName: `${m.name} — Hit`, comboId, comboName: combo.name,
+            rolledAt, macroName: m.name, comboId, comboName: combo.name,
+            attackId, attackPart: 'to-hit', attackName: m.name,
           });
           if (atkResult.damage) {
             await addRoll({
               characterId: charId!, notation: m.notation, result: atkResult.damage,
-              rolledAt,
-              macroName: `${m.name} — ${atkResult.isCrit ? 'Dmg ✕2' : 'Dmg'}`,
-              comboId, comboName: combo.name,
+              rolledAt, macroName: m.name, comboId, comboName: combo.name,
+              attackId, attackPart: 'damage', attackName: m.name,
             });
           }
           setAttackResults(prev => ({ ...prev, [m.macroId]: atkResult }));
@@ -936,26 +963,74 @@ export default function MacrosPage() {
                       </div>
                       <span className="text-xs text-muted-foreground shrink-0">{formatDate(group.rolledAt)}</span>
                     </div>
-                    {/* Constituent results */}
-                    {group.entries.map((entry, ei) => (
-                      <div key={entry.id ?? ei} className="flex items-center gap-3 border-b px-3 py-2 last:border-0">
-                        <span className="w-28 shrink-0 text-xs text-muted-foreground truncate">{entry.macroName}</span>
-                        <div className="flex flex-wrap gap-2">
-                          {entry.result.components.map((comp, ci) => (
-                            <div key={ci} className="flex items-center gap-1">
-                              {comp.label && <span className="text-xs text-muted-foreground">{comp.label}</span>}
-                              <span className={cn(
-                                'text-lg font-bold tabular-nums leading-none',
-                                entry.result.isNatural20 && comp.dice.some(d => d.sides === 20) && 'text-green-600 dark:text-green-400',
-                                entry.result.isNatural1  && comp.dice.some(d => d.sides === 20) && 'text-destructive',
-                              )}>
-                                {comp.subtotal}
-                              </span>
+                    {/* Constituent results — attack pairs on one line */}
+                    {groupComboEntries(group.entries).map((item, ei) => {
+                      if (item.kind === 'attack') {
+                        return (
+                          <div key={item.attackId} className="border-b px-3 py-2 last:border-0">
+                            <div className="flex items-center gap-3">
+                              <span className="w-28 shrink-0 text-xs text-muted-foreground truncate">{item.macroName}</span>
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                {/* To-hit */}
+                                <div className="flex flex-wrap gap-2">
+                                  {item.toHit.result.components.map((comp, ci) => (
+                                    <div key={ci} className="flex items-center gap-1">
+                                      {comp.label && <span className="text-xs text-muted-foreground">{comp.label}</span>}
+                                      <span className={cn(
+                                        'text-lg font-bold tabular-nums leading-none',
+                                        item.isCrit && 'text-green-600 dark:text-green-400',
+                                        item.toHit.result.isNatural1 && 'text-destructive',
+                                      )}>{comp.subtotal}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                                {/* Damage */}
+                                {item.damage && (
+                                  <div className="flex flex-wrap gap-2">
+                                    {item.damage.result.components.map((comp, ci) => (
+                                      <div key={ci} className="flex items-center gap-1">
+                                        {comp.label && <span className="text-xs text-muted-foreground">{comp.label}</span>}
+                                        <span className={cn(
+                                          'text-lg font-bold tabular-nums leading-none',
+                                          item.isCrit && 'text-green-600 dark:text-green-400',
+                                        )}>{comp.subtotal}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {item.isCrit && (
+                                  <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-bold text-green-700 dark:bg-green-900/40 dark:text-green-300">CRIT</span>
+                                )}
+                                {item.toHit.result.isNatural1 && (
+                                  <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300">FUMBLE</span>
+                                )}
+                              </div>
                             </div>
-                          ))}
+                          </div>
+                        );
+                      }
+                      // Regular (non-attack) roll
+                      const entry = item.entry;
+                      return (
+                        <div key={entry.id ?? ei} className="flex items-center gap-3 border-b px-3 py-2 last:border-0">
+                          <span className="w-28 shrink-0 text-xs text-muted-foreground truncate">{entry.macroName}</span>
+                          <div className="flex flex-wrap gap-2">
+                            {entry.result.components.map((comp, ci) => (
+                              <div key={ci} className="flex items-center gap-1">
+                                {comp.label && <span className="text-xs text-muted-foreground">{comp.label}</span>}
+                                <span className={cn(
+                                  'text-lg font-bold tabular-nums leading-none',
+                                  entry.result.isNatural20 && comp.dice.some(d => d.sides === 20) && 'text-green-600 dark:text-green-400',
+                                  entry.result.isNatural1  && comp.dice.some(d => d.sides === 20) && 'text-destructive',
+                                )}>
+                                  {comp.subtotal}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 );
               }
