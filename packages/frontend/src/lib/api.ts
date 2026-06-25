@@ -65,6 +65,11 @@ export interface Macro {
   sortOrder: number;
   type: 'standard' | 'combo';
   macroIds: string[];   // ordered list of constituent macroIds; only meaningful for type='combo'
+  /**
+   * Minimum d20 natural roll that counts as a critical hit (Attack macros only).
+   * Defaults to 20. Set to 19 for Improved Critical, 18 for Superior Critical, etc.
+   */
+  critThreshold?: number;
   createdAt: string;
   updatedAt: string;
 }

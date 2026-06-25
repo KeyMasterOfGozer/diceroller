@@ -84,6 +84,12 @@ export function evaluate(macro: MacroNode, options: RollOptions = {}): RollResul
 
     if (sides < 1) throw new Error(`Die must have at least 1 side`);
 
+    // Apply character toggle to ~ dice (only if no explicit adv/dis on the die itself)
+    if (dnode.modifiers.toggleAdvantage && !mods.advantage && !mods.disadvantage) {
+      if (options.advantageMode === 'advantage')    mods.advantage    = true;
+      else if (options.advantageMode === 'disadvantage') mods.disadvantage = true;
+    }
+
     // Advantage/disadvantage: roll 2, keep 1
     if (mods.advantage) { count = 2; mods.keepHigh = 1; }
     if (mods.disadvantage) { count = 2; mods.keepLow = 1; }
@@ -192,8 +198,10 @@ export function evaluate(macro: MacroNode, options: RollOptions = {}): RollResul
 
   const total = components.reduce((s, c) => s + c.subtotal, 0);
   const allDice = components.flatMap(c => c.dice);
-  const isNatural20 = allDice.some(d => d.sides === 20 && d.value === 20 && !d.dropped);
-  const isNatural1  = allDice.some(d => d.sides === 20 && d.value === 1  && !d.dropped);
+  const activeD20 = allDice.filter(d => d.sides === 20 && !d.dropped);
+  const isNatural20 = activeD20.some(d => d.value === 20);
+  const isNatural1  = activeD20.some(d => d.value === 1);
+  const highestD20  = activeD20.length > 0 ? Math.max(...activeD20.map(d => d.value)) : 0;
 
   return {
     notation: "",
@@ -201,6 +209,7 @@ export function evaluate(macro: MacroNode, options: RollOptions = {}): RollResul
     total,
     isNatural20,
     isNatural1,
+    highestD20,
     unresolvedVariables: unresolved,
     rolledAt: new Date(),
   };

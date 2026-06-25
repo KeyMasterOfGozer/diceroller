@@ -277,6 +277,73 @@ describe("real-world macro examples", () => {
   });
 });
 
+// ── Toggle advantage (~ modifier) ────────────────────────────────────────────
+
+describe("toggle advantage (~)", () => {
+  it("rolls normally when advantageMode is 'normal'", () => {
+    // 1d20~ with normal mode: one die, value from fixed(10)
+    const r = roll("1d20~+5", { random: fixed(10), advantageMode: 'normal' });
+    expect(r.total).toBe(15);
+    expect(r.components[0].dice).toHaveLength(1);
+  });
+
+  it("rolls normally when advantageMode is absent", () => {
+    const r = roll("1d20~+5", { random: fixed(10) });
+    expect(r.total).toBe(15);
+    expect(r.components[0].dice).toHaveLength(1);
+  });
+
+  it("applies advantage (keeps highest) when advantageMode is 'advantage'", () => {
+    // cycle: 8, 15 → keep 15
+    const r = roll("1d20~", { random: cycle(8, 15), advantageMode: 'advantage' });
+    expect(r.total).toBe(15);
+    expect(r.components[0].dice).toHaveLength(2);
+    expect(r.components[0].dice.filter(d => d.dropped)).toHaveLength(1);
+  });
+
+  it("applies disadvantage (keeps lowest) when advantageMode is 'disadvantage'", () => {
+    // cycle: 15, 8 → keep 8
+    const r = roll("1d20~", { random: cycle(15, 8), advantageMode: 'disadvantage' });
+    expect(r.total).toBe(8);
+    expect(r.components[0].dice).toHaveLength(2);
+  });
+
+  it("explicit adv on die overrides toggle disadvantage", () => {
+    // 1d20adv~: adv is explicit, so even with disadvantage toggle it keeps highest
+    const r = roll("1d20adv~", { random: cycle(5, 18), advantageMode: 'disadvantage' });
+    expect(r.total).toBe(18);
+  });
+
+  it("explicit dis on die overrides toggle advantage", () => {
+    const r = roll("1d20dis~", { random: cycle(5, 18), advantageMode: 'advantage' });
+    expect(r.total).toBe(5);
+  });
+
+  it("unmarked dice are unaffected by the toggle", () => {
+    // 1d20 (no ~) with advantage mode: still rolls only one die
+    const r = roll("1d20+5", { random: fixed(10), advantageMode: 'advantage' });
+    expect(r.total).toBe(15);
+    expect(r.components[0].dice).toHaveLength(1);
+  });
+
+  it("only marked component is affected in compound macro", () => {
+    // 1d20~+5 [To Hit]; 1d8+3 [Damage] — only to-hit gets advantage
+    const r = roll("1d20~+5 [To Hit]; 1d8+3 [Damage]", {
+      random: cycle(8, 15, 6),  // to-hit: 8 dropped, 15 kept; damage: 6
+      advantageMode: 'advantage',
+    });
+    expect(r.components[0].subtotal).toBe(20); // 15 + 5
+    expect(r.components[0].dice).toHaveLength(2);
+    expect(r.components[1].subtotal).toBe(9);  // 6 + 3
+    expect(r.components[1].dice).toHaveLength(1);
+  });
+
+  it("validate accepts ~ notation", () => {
+    expect(validate("1d20~+5")).toBeNull();
+    expect(validate("1d20~ [To Hit]; 1d8+3 [Damage]")).toBeNull();
+  });
+});
+
 // ── validate() ───────────────────────────────────────────────────────────────
 
 describe("validate()", () => {

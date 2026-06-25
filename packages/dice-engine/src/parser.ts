@@ -7,7 +7,7 @@
  *   expr      := term (('+' | '-') term)*
  *   term      := factor ('*' factor)*
  *   factor    := '-' factor | '(' expr ')' | diceExpr | number | variable | critExpr
- *   diceExpr  := count? 'd' sides modifier* ('!')?  ('adv' | 'dis')?
+ *   diceExpr  := count? 'd' sides modifier* ('!')?  ('adv' | 'dis')? ('~')?
  *   modifier  := ('kh'|'kl'|'dh'|'dl') number
  *              | ('r' | 'ro') number
  *              | 'min' number | 'max' number
@@ -42,8 +42,9 @@ export interface DiceModifiers {
   maxVal?: number;
   countSuccesses?: number;
   exploding?: boolean;
-  advantage?: boolean;   // shorthand: 2d20kh1
+  advantage?: boolean;       // shorthand: 2d20kh1
   disadvantage?: boolean;
+  toggleAdvantage?: boolean; // ~ modifier: apply character ADV/DIS toggle at roll time
 }
 
 export interface DiceNode {
@@ -172,6 +173,8 @@ export function parse(input: string): MacroNode {
       const sides: ASTNode = { kind: "number", value: 20 };
       const count: ASTNode = { kind: "number", value: 1 };
       const mods: DiceModifiers = adv ? { advantage: true } : { disadvantage: true };
+      // Allow ~ after adv/dis for consistency (toggle has no effect since adv/dis is explicit)
+      if (match(TokenType.Tilde)) { consume(); mods.toggleAdvantage = true; }
       return { kind: "dice", count, sides, modifiers: mods };
     }
 
@@ -208,6 +211,9 @@ export function parse(input: string): MacroNode {
       if (match(TokenType.Exclaim)) {
         consume();
         mods.exploding = true;
+      } else if (match(TokenType.Tilde)) {
+        consume();
+        mods.toggleAdvantage = true;
       } else if (match(TokenType.Identifier)) {
         const id = peek().value.toLowerCase();
         if (id === "kh") { consume(); mods.keepHigh = expectInt(); }

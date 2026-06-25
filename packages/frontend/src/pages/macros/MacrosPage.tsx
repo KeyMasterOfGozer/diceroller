@@ -36,6 +36,7 @@ interface EditState {
   category: string;
   description: string;
   notationError: string;
+  critThreshold: number;
   // combo-only
   macroIds: string[];
 }
@@ -231,6 +232,7 @@ export default function MacrosPage() {
   const [newNotation, setNewNotation] = useState('');
   const [newCategory, setNewCategory] = useState('Utility');
   const [newDesc, setNewDesc] = useState('');
+  const [newCritThreshold, setNewCritThreshold] = useState(20);
   const [notationError, setNotationError] = useState('');
 
   // Combo macro create form
@@ -243,10 +245,13 @@ export default function MacrosPage() {
   // Inline edit
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState>({
-    name: '', notation: '', category: 'Utility', description: '', notationError: '', macroIds: [],
+    name: '', notation: '', category: 'Utility', description: '', notationError: '', critThreshold: 20, macroIds: [],
   });
   const [editComboPick, setEditComboPick] = useState(''); // dropdown for adding to an in-edit combo
   const [isSaving, setIsSaving] = useState(false);
+
+  // Advantage / Normal / Disadvantage toggle (applies to ~ marked dice)
+  const [advantageMode, setAdvantageMode] = useState<'advantage' | 'normal' | 'disadvantage'>('normal');
 
   // Roll results
   const [macroResults, setMacroResults]   = useState<Record<string, RollResult>>({});
@@ -300,11 +305,12 @@ export default function MacrosPage() {
         category: newCategory, description: newDesc,
         sortOrder: macros.length,
         type: 'standard', macroIds: [],
+        ...(newCategory === 'Attack' && newCritThreshold !== 20 ? { critThreshold: newCritThreshold } : {}),
       });
       setMacros(prev => [...prev, macro]);
       toast({ title: `"${macro.name}" created` });
       setShowForm(false);
-      setNewName(''); setNewNotation(''); setNewCategory('Utility'); setNewDesc('');
+      setNewName(''); setNewNotation(''); setNewCategory('Utility'); setNewDesc(''); setNewCritThreshold(20);
     } catch (err) {
       toast({ title: 'Failed to create macro', description: (err as Error).message, variant: 'destructive' });
     }
@@ -341,6 +347,7 @@ export default function MacrosPage() {
       category: macro.category,
       description: macro.description ?? '',
       notationError: '',
+      critThreshold: macro.critThreshold ?? 20,
       macroIds: macro.macroIds ?? [],
     });
     setShowForm(false);
@@ -366,6 +373,7 @@ export default function MacrosPage() {
         name: editState.name,
         category: editState.category,
         description: editState.description,
+        critThreshold: editState.category === 'Attack' ? editState.critThreshold : undefined,
       };
       if (macro.type !== 'combo') update.notation = editState.notation;
       if (macro.type === 'combo') update.macroIds = editState.macroIds;
@@ -387,7 +395,7 @@ export default function MacrosPage() {
     try {
       // Attack category macros get the crit-aware two-phase roll
       if (macro.category === 'Attack') {
-        const atkResult = rollAttack(macro.notation, { variables: vars });
+        const atkResult = rollAttack(macro.notation, { variables: vars, critThreshold: macro.critThreshold ?? 20, advantageMode });
         const unresolved = [
           ...atkResult.toHit.unresolvedVariables,
           ...(atkResult.damage?.unresolvedVariables ?? []),
@@ -418,7 +426,7 @@ export default function MacrosPage() {
       }
 
       // Standard roll
-      const result = roll(macro.notation, { variables: vars });
+      const result = roll(macro.notation, { variables: vars, advantageMode });
       if (result.unresolvedVariables.length > 0) {
         toast({
           title: 'Unresolved variables',
@@ -452,7 +460,7 @@ export default function MacrosPage() {
     for (const m of validMacros) {
       try {
         if (m.category === 'Attack') {
-          const atkResult = rollAttack(m.notation, { variables: vars });
+          const atkResult = rollAttack(m.notation, { variables: vars, critThreshold: m.critThreshold ?? 20, advantageMode });
           results.push({ kind: 'attack', macroName: m.name, atkResult });
           // Store to-hit + damage with both comboId AND attackId so the history
           // renderer can pair them on one line within the combo group.
@@ -471,7 +479,7 @@ export default function MacrosPage() {
           }
           setAttackResults(prev => ({ ...prev, [m.macroId]: atkResult }));
         } else {
-          const result = roll(m.notation, { variables: vars });
+          const result = roll(m.notation, { variables: vars, advantageMode });
           results.push({ kind: 'roll', macroName: m.name, result });
           await addRoll({
             characterId: charId!, notation: m.notation, result,
@@ -595,6 +603,37 @@ export default function MacrosPage() {
         </div>
       </div>
 
+      {/* Advantage / Normal / Disadvantage toggle */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Roll mode</span>
+        <div className="flex rounded-md border border-input overflow-hidden text-sm">
+          {(['advantage', 'normal', 'disadvantage'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setAdvantageMode(mode)}
+              className={cn(
+                'px-3 py-1 font-medium transition-colors',
+                advantageMode === mode
+                  ? mode === 'advantage'
+                    ? 'bg-green-600 text-white'
+                    : mode === 'disadvantage'
+                      ? 'bg-red-600 text-white'
+                      : 'bg-primary text-primary-foreground'
+                  : 'bg-background text-muted-foreground hover:bg-muted',
+              )}
+            >
+              {mode === 'advantage' ? 'ADV' : mode === 'normal' ? 'Normal' : 'DIS'}
+            </button>
+          ))}
+        </div>
+        {advantageMode !== 'normal' && (
+          <span className="text-xs text-muted-foreground">
+            Affects dice marked with <code className="rounded bg-muted px-1 py-0.5 font-mono">~</code> in macro notation
+          </span>
+        )}
+      </div>
+
       {/* Create standard macro form */}
       {showForm && (
         <Card>
@@ -620,12 +659,24 @@ export default function MacrosPage() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="macro-category">Category</Label>
-                  <CategorySelect id="macro-category" value={newCategory} onChange={setNewCategory} />
+                  <CategorySelect id="macro-category" value={newCategory} onChange={v => { setNewCategory(v); if (v !== 'Attack') setNewCritThreshold(20); }} />
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="macro-desc">Description</Label>
                   <Input id="macro-desc" value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder="Optional" />
                 </div>
+                {newCategory === 'Attack' && (
+                  <div className="col-span-2 flex flex-col gap-1.5">
+                    <Label htmlFor="macro-crit-threshold">Crit on roll of <strong>{newCritThreshold}–20</strong></Label>
+                    <Input
+                      id="macro-crit-threshold" type="number" min={1} max={20}
+                      value={newCritThreshold}
+                      onChange={e => setNewCritThreshold(Math.min(20, Math.max(1, Number(e.target.value))))}
+                      className="w-24"
+                    />
+                    <p className="text-xs text-muted-foreground">Default 20. Set to 19 for Improved Critical, 18 for Superior Critical.</p>
+                  </div>
+                )}
               </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
@@ -746,12 +797,24 @@ export default function MacrosPage() {
                           )}
                           <div className="flex flex-col gap-1.5">
                             <Label>Category</Label>
-                            <CategorySelect value={editState.category} onChange={v => setEditState(s => ({ ...s, category: v }))} />
+                            <CategorySelect value={editState.category} onChange={v => setEditState(s => ({ ...s, category: v, critThreshold: v !== 'Attack' ? 20 : s.critThreshold }))} />
                           </div>
                           <div className="flex flex-col gap-1.5">
                             <Label>Description</Label>
                             <Input value={editState.description} onChange={e => setEditState(s => ({ ...s, description: e.target.value }))} placeholder="Optional" />
                           </div>
+                          {editState.category === 'Attack' && (
+                            <div className="col-span-2 flex flex-col gap-1.5">
+                              <Label>Crit on roll of <strong>{editState.critThreshold}–20</strong></Label>
+                              <Input
+                                type="number" min={1} max={20}
+                                value={editState.critThreshold}
+                                onChange={e => setEditState(s => ({ ...s, critThreshold: Math.min(20, Math.max(1, Number(e.target.value))) }))}
+                                className="w-24"
+                              />
+                              <p className="text-xs text-muted-foreground">Default 20. Set to 19 for Improved Critical, 18 for Superior Critical.</p>
+                            </div>
+                          )}
                         </div>
                         <div className="flex justify-end gap-2">
                           <Button type="button" variant="ghost" size="sm" onClick={cancelEdit}>

@@ -13,6 +13,7 @@ export const enum TokenType {
   Identifier  = "Identifier",  // adv, dis, kh, kl, dh, dl, r, ro, min, max, cs, crit, etc.
   Variable    = "Variable",    // {{name}}
   Exclaim     = "Exclaim",     // !
+  Tilde       = "Tilde",       // ~ (toggle advantage/disadvantage)
   EOF         = "EOF",
 }
 
@@ -63,6 +64,7 @@ export function tokenize(input: string): Token[] {
     if (src[i] === "*") { tokens.push({ type: TokenType.Star,     value: "*", pos: i++ }); continue; }
     if (src[i] === ";") { tokens.push({ type: TokenType.Semicolon,value: ";", pos: i++ }); continue; }
     if (src[i] === "!") { tokens.push({ type: TokenType.Exclaim,  value: "!", pos: i++ }); continue; }
+    if (src[i] === "~") { tokens.push({ type: TokenType.Tilde,    value: "~", pos: i++ }); continue; }
 
     // Number
     if (/[0-9]/.test(src[i])) {

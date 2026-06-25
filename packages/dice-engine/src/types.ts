@@ -31,6 +31,8 @@ export interface RollResult {
   isNatural20: boolean;
   /** True if any d20 component rolled a natural 1 */
   isNatural1: boolean;
+  /** The highest value rolled on any active (non-dropped) d20 die; 0 if no d20 was rolled */
+  highestD20: number;
   /** Variable names referenced in the notation that had no value */
   unresolvedVariables: string[];
   rolledAt: Date;
@@ -49,6 +51,19 @@ export interface RollOptions {
    * When true for a given index, dice in that component are doubled.
    */
   forceCritComponents?: boolean[];
+  /**
+   * The minimum d20 natural roll that counts as a critical hit (default 20).
+   * Set to 19 for Improved Critical (Champion fighter), 18 for Superior Critical, etc.
+   */
+  critThreshold?: number;
+  /**
+   * Character-level advantage mode applied to dice marked with ~ in the notation.
+   * 'advantage'    → marked dice roll 2, keep highest
+   * 'disadvantage' → marked dice roll 2, keep lowest
+   * 'normal'       → marked dice roll as written (default)
+   * Explicit adv/dis on a die always overrides this toggle.
+   */
+  advantageMode?: 'advantage' | 'normal' | 'disadvantage';
 }
 
 /**

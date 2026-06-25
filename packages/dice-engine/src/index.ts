@@ -43,7 +43,8 @@ export function rollAttack(notation: string, options: RollOptions = {}): AttackR
   const toHit = evaluate(toHitMacro, options);
   toHit.notation = notation;
 
-  const isCrit   = toHit.isNatural20;
+  const critThreshold = options.critThreshold ?? 20;
+  const isCrit   = toHit.highestD20 >= critThreshold;
   const isFumble = toHit.isNatural1;
 
   // Roll damage components (possibly with crit doubling)

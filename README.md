@@ -87,6 +87,36 @@ d20dis + {{wis_mod}}     — Wisdom save at disadvantage
 2d20kh1 + {{prof}}       — keep-highest longhand
 ```
 
+### Toggle Advantage — `~`
+
+Append `~` to a die to make it respond to the **Roll Mode** toggle on the Macros page. The toggle has three positions: **ADV**, **Normal**, and **DIS**.
+
+| Toggle state | `1d20~` rolls as |
+|---|---|
+| ADV | `2d20kh1` (advantage) |
+| Normal | `1d20` (no change) |
+| DIS | `2d20kl1` (disadvantage) |
+
+```
+1d20~+5 [To Hit]                        — to-hit roll follows the toggle
+1d20~ + {{prof}} + {{str_mod}} [To Hit] — with modifiers
+```
+
+**Rules:**
+- Only dice explicitly marked with `~` are affected. All other dice in the macro roll as written.
+- If a die already has a hardcoded `adv` or `dis` modifier, that always wins — the toggle has no effect on that die.
+- Works in any macro category: Attack, Skill, Save, Utility, and inside combo macros.
+
+**Typical use:** Write all your to-hit and skill-check dice with `~`. When you gain advantage from *Help*, *Reckless Attack*, *Faerie Fire*, etc., flip the toggle to **ADV** before rolling. Flip back to **Normal** when the effect ends. No need to edit any macro.
+
+```
+— Longsword Attack
+1d20~+{{prof}}+{{str_mod}} [To Hit]; 1d8+{{str_mod}} [Slashing]
+
+— Perception Check
+1d20~+{{prof}}+{{wis_mod}} [Perception]
+```
+
 ### Reroll
 
 ```
@@ -158,16 +188,18 @@ Each macro has a **category** that controls how it's rolled.
 Set a macro's category to **Attack** to enable the automatic crit mechanic:
 
 - The **first component** is the to-hit roll (`d20 + modifiers`).
-- If that d20 is a **natural 20**, every remaining component automatically rolls as a critical hit — dice are doubled, flat modifiers are not.
+- If that d20 is a **natural 20** (or meets the macro's **crit threshold**), every remaining component automatically rolls as a critical hit — dice are doubled, flat modifiers are not.
 - If the d20 is a **natural 1** (fumble), the result box gets a red border.
-- A natural 20 gets a green border.
+- A natural 20 (or crit-range roll) gets a green border.
 - To-hit and damage results are shown side by side on one line.
 
 ```
-1d20 + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Slashing]; 1d6 [Fire]
+1d20~ + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Slashing]; 1d6 [Fire]
 ```
 
-On a nat-20, the engine automatically doubles the damage dice — you never need to manually call `crit()` inside an Attack macro's damage components.
+On a crit, the engine automatically doubles the damage dice — you never need to manually call `crit()` inside an Attack macro's damage components.
+
+**Crit threshold:** By default, only a natural 20 triggers a critical hit. Attack macros have an optional **Crit range** field: set it to `19` for Improved Critical (Champion fighter, crits on 19–20) or `18` for Superior Critical.
 
 ### Combo Macros
 
@@ -220,34 +252,49 @@ Accessible from the user menu (top-right avatar → **Profile & settings**):
 ### Basic Attack
 
 ```
-1d20 + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Damage]
+1d20~ + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Damage]
 ```
-Set category to **Attack**. Crits auto-double the damage dice.
+Set category to **Attack**. Crits auto-double the damage dice. The `~` means flipping the Roll Mode toggle to **ADV** or **DIS** will affect this to-hit roll automatically.
 
-### Ranged Attack (Advantage)
+### Ranged Attack (always advantage, e.g. Sharpshooter feat situation)
 
 ```
 d20adv + {{prof}} + {{dex_mod}} [To Hit]; 1d8 + {{dex_mod}} [Piercing]
 ```
+Use hardcoded `adv` when advantage is a permanent feature of the attack, not a situational toggle.
+
+### Ranged Attack (toggle-controlled advantage)
+
+```
+1d20~ + {{prof}} + {{dex_mod}} [To Hit]; 1d8 + {{dex_mod}} [Piercing]
+```
+Set category to **Attack**. Flip the **Roll Mode** toggle to ADV when you have *Steady Aim* or *Help*.
 
 ### Flaming Sword (multi-damage-type)
 
 ```
-1d20 + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Slashing]; 1d6 [Fire]
+1d20~ + {{prof}} + {{str_mod}} [To Hit]; 1d8 + {{str_mod}} [Slashing]; 1d6 [Fire]
 ```
 Set category to **Attack**. Both damage components double on a crit.
 
 ### Ability Check
 
 ```
-1d20 + {{wis_mod}} + {{prof}} [Perception]
+1d20~ + {{wis_mod}} + {{prof}} [Perception]
 ```
 
-### Saving Throw (Disadvantage)
+### Saving Throw (always disadvantage, e.g. Restrained)
 
 ```
 d20dis + {{con_mod}} [CON Save]
 ```
+
+### Saving Throw (toggle-controlled)
+
+```
+1d20~ + {{con_mod}} [CON Save]
+```
+Flip Roll Mode to **DIS** when conditions impose disadvantage.
 
 ### Stat Generation
 
