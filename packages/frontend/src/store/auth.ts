@@ -9,6 +9,7 @@ interface AuthUser {
   userId: string;
   username: string;
   email: string;
+  isAdmin: boolean;
 }
 
 interface AuthState {
@@ -37,11 +38,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const cognitoUser = await getCurrentUser();
       const session = await fetchAuthSession();
       const claims = session.tokens?.idToken?.payload;
+      const groups = claims?.['cognito:groups'];
+      const groupList: string[] = Array.isArray(groups)
+        ? (groups as string[])
+        : typeof groups === 'string' ? [groups] : [];
       set({
         user: {
-          userId: cognitoUser.userId,
+          userId:  cognitoUser.userId,
           username: cognitoUser.username,
-          email: (claims?.['email'] as string) ?? cognitoUser.username,
+          email:   (claims?.['email'] as string) ?? cognitoUser.username,
+          isAdmin: groupList.includes('Admins'),
         },
         isInitialized: true,
         isLoading: false,

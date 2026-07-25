@@ -29,12 +29,20 @@ export default function SignInPage() {
     }
   }
 
+  const notice = (location.state as { notice?: string })?.notice;
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div>
         <h2 className="text-xl font-semibold">Sign in</h2>
         <p className="mt-1 text-sm text-muted-foreground">Enter your credentials to continue</p>
       </div>
+
+      {notice && (
+        <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-400">
+          {notice}
+        </p>
+      )}
 
       {error && (
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -50,7 +58,15 @@ export default function SignInPage() {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">Password</Label>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="password">Password</Label>
+          <Link
+            to="/auth/forgot-password"
+            className="text-xs text-muted-foreground hover:text-primary hover:underline"
+          >
+            Forgot password?
+          </Link>
+        </div>
         <Input
           id="password" type="password" autoComplete="current-password" required
           value={password} onChange={e => setPassword(e.target.value)}

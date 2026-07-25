@@ -2,6 +2,8 @@ import * as path from 'path';
 import { Construct } from 'constructs';
 import * as cdk from 'aws-cdk-lib';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import { NodejsFunction, BundlingOptions } from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
@@ -65,6 +67,7 @@ export class DiceRollerApi extends Construct {
         memorySize: 256,
         environment: { ...sharedEnv, ...extraEnv },
         bundling: sharedBundling,
+        logRetention: logs.RetentionDays.TWO_WEEKS,
       });
     }
 
@@ -77,6 +80,16 @@ export class DiceRollerApi extends Construct {
       DNDBEYOND_SECRET_ARN: dndBeyondSecret.secretArn,
     });
 
+    // Admin Lambda — log group names are /aws/lambda/<functionName>
+    const adminFn = makeFn(this, 'AdminFn', 'admin.ts', {
+      USER_POOL_ID:        userPool.userPoolId,
+      LOG_GROUP_ME:        `/aws/lambda/${meFn.functionName}`,
+      LOG_GROUP_CHARACTERS:`/aws/lambda/${charactersFn.functionName}`,
+      LOG_GROUP_MACROS:    `/aws/lambda/${macrosFn.functionName}`,
+      LOG_GROUP_SHARING:   `/aws/lambda/${sharingFn.functionName}`,
+      LOG_GROUP_DNDBEYOND: `/aws/lambda/${dndBeyondFn.functionName}`,
+    });
+
     // ── IAM: DynamoDB access ──────────────────────────────────────────────
     table.grantReadWriteData(meFn);
     table.grantReadWriteData(charactersFn);
@@ -86,6 +99,31 @@ export class DiceRollerApi extends Construct {
 
     // ── IAM: Secrets Manager (dndbeyond Lambda only) ──────────────────────
     dndBeyondSecret.grantRead(dndBeyondFn);
+
+    // ── IAM: Admin Lambda ─────────────────────────────────────────────────
+    adminFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'cognito-idp:ListUsers',
+        'cognito-idp:AdminDisableUser',
+        'cognito-idp:AdminEnableUser',
+        'cognito-idp:AdminDeleteUser',
+        'cognito-idp:AdminResetUserPassword',
+      ],
+      resources: [userPool.userPoolArn],
+    }));
+
+    adminFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'logs:FilterLogEvents',
+        'logs:DescribeLogGroups',
+        'logs:DescribeLogStreams',
+      ],
+      // Restrict to our own log groups only
+      resources: [
+        `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/aws/lambda/DiceRoller*:*`,
+        `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/aws/lambda/DiceRoller*`,
+      ],
+    }));
 
     // ── JWT Authorizer (Cognito) ──────────────────────────────────────────
     const jwtAuthorizer = new HttpJwtAuthorizer('CognitoAuthorizer', userPool.userPoolProviderUrl, {
@@ -122,6 +160,7 @@ export class DiceRollerApi extends Construct {
     const macrosInt     = new HttpLambdaIntegration('MacrosInt',     macrosFn);
     const sharingInt    = new HttpLambdaIntegration('SharingInt',    sharingFn);
     const dndInt        = new HttpLambdaIntegration('DndInt',        dndBeyondFn);
+    const adminInt      = new HttpLambdaIntegration('AdminInt',      adminFn);
 
     // ── /me ───────────────────────────────────────────────────────────────
     this.api.addRoutes({ path: '/me',    methods: [apigw.HttpMethod.GET, apigw.HttpMethod.PUT], integration: meInt, ...auth });
@@ -146,6 +185,16 @@ export class DiceRollerApi extends Construct {
     this.api.addRoutes({ path: '/dndbeyond/token',                                 methods: [apigw.HttpMethod.POST],                                integration: dndInt, ...auth });
     this.api.addRoutes({ path: '/dndbeyond/characters',                            methods: [apigw.HttpMethod.GET],                                 integration: dndInt, ...auth });
     this.api.addRoutes({ path: '/characters/{id}/import/dndbeyond/{ddbCharId}',   methods: [apigw.HttpMethod.POST],                                integration: dndInt, ...auth });
+
+    // ── Admin ─────────────────────────────────────────────────────────────
+    // All admin routes require a valid JWT (Cognito auth); the Lambda itself
+    // enforces membership in the "Admins" group.
+    this.api.addRoutes({ path: '/admin/users',                                     methods: [apigw.HttpMethod.GET],                                 integration: adminInt, ...auth });
+    this.api.addRoutes({ path: '/admin/users/{username}/disable',                  methods: [apigw.HttpMethod.POST],                                integration: adminInt, ...auth });
+    this.api.addRoutes({ path: '/admin/users/{username}/enable',                   methods: [apigw.HttpMethod.POST],                                integration: adminInt, ...auth });
+    this.api.addRoutes({ path: '/admin/users/{username}/reset-password',           methods: [apigw.HttpMethod.POST],                                integration: adminInt, ...auth });
+    this.api.addRoutes({ path: '/admin/users/{username}',                          methods: [apigw.HttpMethod.DELETE],                              integration: adminInt, ...auth });
+    this.api.addRoutes({ path: '/admin/logs',                                      methods: [apigw.HttpMethod.GET],                                 integration: adminInt, ...auth });
 
     // ── Output ────────────────────────────────────────────────────────────
     new cdk.CfnOutput(scope, 'ApiUrl', {

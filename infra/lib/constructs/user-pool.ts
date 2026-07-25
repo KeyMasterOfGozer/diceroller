@@ -26,10 +26,11 @@ export class DiceRollerUserPool extends Construct {
         requireSymbols: false,
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-      // Email verification message
+      // Email verification (sign-up) + password reset both use this template.
+      // The {####} placeholder is replaced with the 6-digit code by Cognito.
       userVerification: {
-        emailSubject: 'Verify your D&D Dice Roller account',
-        emailBody: 'Your verification code is {####}',
+        emailSubject: 'Your D&D Dice Roller code',
+        emailBody: 'Your D&D Dice Roller code is {####}. This code expires in 1 hour.',
         emailStyle: cognito.VerificationEmailStyle.CODE,
       },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -63,6 +64,13 @@ export class DiceRollerUserPool extends Construct {
       accessTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
       enableTokenRevocation: true,
+    });
+
+    // ── Groups ────────────────────────────────────────────────────────────
+    new cognito.CfnUserPoolGroup(this, 'AdminsGroup', {
+      userPoolId:  this.userPool.userPoolId,
+      groupName:   'Admins',
+      description: 'Application administrators with access to user management and logs.',
     });
 
     // ── Outputs ───────────────────────────────────────────────────────────

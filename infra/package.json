@@ -10,7 +10,14 @@
     "deploy:stateful": "node scripts/deploy.mjs DiceRollerStateful --require-approval never",
     "deploy:app": "node scripts/deploy.mjs DiceRollerApp --require-approval never",
     "deploy": "node scripts/deploy.mjs --all --require-approval never",
-    "destroy": "cdk destroy --all"
+    "destroy": "cdk destroy --all",
+    "logs": "node scripts/logs.mjs",
+    "logs:characters": "node scripts/logs.mjs characters",
+    "logs:macros": "node scripts/logs.mjs macros",
+    "logs:sharing": "node scripts/logs.mjs sharing",
+    "logs:dndbeyond": "node scripts/logs.mjs dndbeyond",
+    "logs:me": "node scripts/logs.mjs me",
+    "logs:admin": "node scripts/logs.mjs admin"
   },
   "dependencies": {
     "aws-cdk-lib": "^2.258.0",

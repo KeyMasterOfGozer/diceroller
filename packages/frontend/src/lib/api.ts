@@ -125,6 +125,60 @@ export const sharingApi = {
     request<Macro>('POST', `/characters/${charId}/macros/${crypto.randomUUID()}/import-share`, { shareToken }),
 };
 
+// Admin
+export interface AdminUser {
+  username: string;
+  email: string;
+  emailVerified: boolean;
+  status: string;
+  enabled: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+  nextToken: string | null;
+}
+
+export interface AdminLogEvent {
+  timestamp: number;
+  message: string;
+  logStreamName: string;
+}
+
+export interface AdminLogsResponse {
+  fn: string;
+  logGroup: string;
+  hours: number;
+  filter: string;
+  events: AdminLogEvent[];
+}
+
+export const adminApi = {
+  listUsers: (search?: string, token?: string) => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (token)  params.set('token', token);
+    const qs = params.toString();
+    return request<AdminUsersResponse>('GET', `/admin/users${qs ? `?${qs}` : ''}`);
+  },
+  disableUser:   (username: string) =>
+    request<{ success: boolean }>('POST',   `/admin/users/${encodeURIComponent(username)}/disable`),
+  enableUser:    (username: string) =>
+    request<{ success: boolean }>('POST',   `/admin/users/${encodeURIComponent(username)}/enable`),
+  resetPassword: (username: string) =>
+    request<{ success: boolean }>('POST',   `/admin/users/${encodeURIComponent(username)}/reset-password`),
+  deleteUser:    (username: string) =>
+    request<{ success: boolean }>('DELETE', `/admin/users/${encodeURIComponent(username)}`),
+  listLogGroups: () =>
+    request<{ logGroups: string[] }>('GET', '/admin/logs'),
+  getLogs: (fn: string, filter = 'ERROR', hours = 24) =>
+    request<AdminLogsResponse>('GET',
+      `/admin/logs?fn=${encodeURIComponent(fn)}&filter=${encodeURIComponent(filter)}&hours=${hours}`
+    ),
+};
+
 // D&D Beyond
 export interface DdbCharacterClass {
   name: string;

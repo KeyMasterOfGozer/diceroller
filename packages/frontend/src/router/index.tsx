@@ -6,15 +6,34 @@ import AuthLayout from '@/layouts/AuthLayout';
 import SignInPage from '@/pages/auth/SignInPage';
 import SignUpPage from '@/pages/auth/SignUpPage';
 import ConfirmPage from '@/pages/auth/ConfirmPage';
+import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from '@/pages/auth/ResetPasswordPage';
 import CharactersPage from '@/pages/characters/CharactersPage';
 import CharacterPage from '@/pages/characters/CharacterPage';
 import MacrosPage from '@/pages/macros/MacrosPage';
 import SharedMacroPage from '@/pages/shared/SharedMacroPage';
 import ProfilePage from '@/pages/profile/ProfilePage';
 import DdbCallbackPage from '@/pages/ddb/DdbCallbackPage';
+import AdminPage from '@/pages/admin/AdminPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 
-// ── Auth guard ────────────────────────────────────────────────────────────────
+// ── Auth guards ───────────────────────────────────────────────────────────────
+
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { user, isInitialized, initialize } = useAuthStore();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!isInitialized) initialize();
+  }, [isInitialized, initialize]);
+
+  if (!isInitialized) return null; // RequireAuth parent already shows the spinner
+
+  if (!user) return <Navigate to="/auth/sign-in" state={{ from: location }} replace />;
+  if (!user.isAdmin) return <Navigate to="/characters" replace />;
+
+  return <>{children}</>;
+}
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, isInitialized, initialize } = useAuthStore();
@@ -65,6 +84,14 @@ export const router = createBrowserRouter([
       { path: 'characters/:id/macros', element: <MacrosPage /> },
       { path: 'profile', element: <ProfilePage /> },
       { path: 'ddb-callback', element: <DdbCallbackPage /> },
+      {
+        path: 'admin',
+        element: (
+          <RequireAdmin>
+            <AdminPage />
+          </RequireAdmin>
+        ),
+      },
     ],
   },
   // Auth routes (no auth required)
@@ -76,6 +103,8 @@ export const router = createBrowserRouter([
       { path: 'sign-in', element: <SignInPage /> },
       { path: 'sign-up', element: <SignUpPage /> },
       { path: 'confirm', element: <ConfirmPage /> },
+      { path: 'forgot-password', element: <ForgotPasswordPage /> },
+      { path: 'reset-password', element: <ResetPasswordPage /> },
     ],
   },
   // Public shared macro route

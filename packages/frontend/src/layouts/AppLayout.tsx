@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Dices, User, LogOut, Menu, X, Plus, Settings } from 'lucide-react';
+import { Dices, User, LogOut, Menu, X, Plus, Settings, Shield } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { useCharactersStore } from '@/store/characters';
 import { Button } from '@/components/ui/button';
@@ -83,7 +83,7 @@ export default function AppLayout() {
         </ul>
       )}
 
-      <div className="mt-auto border-t pt-2">
+      <div className="mt-auto border-t pt-2 space-y-0.5">
         <NavLink
           to="/characters"
           className={({ isActive }) =>
@@ -95,6 +95,19 @@ export default function AppLayout() {
           <User className="h-4 w-4" />
           All Characters
         </NavLink>
+        {user?.isAdmin && (
+          <NavLink
+            to="/admin"
+            className={({ isActive }) =>
+              cn('flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent',
+                isActive && 'bg-accent font-medium')
+            }
+            onClick={() => setSidebarOpen(false)}
+          >
+            <Shield className="h-4 w-4" />
+            Admin
+          </NavLink>
+        )}
       </div>
     </nav>
   );
@@ -166,6 +179,15 @@ export default function AppLayout() {
                 <Settings className="mr-2 h-4 w-4" />
                 Profile &amp; settings
               </DropdownMenuItem>
+              {user?.isAdmin && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigate('/admin')}>
+                    <Shield className="mr-2 h-4 w-4" />
+                    Admin
+                  </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="text-destructive">
                 <LogOut className="mr-2 h-4 w-4" />
