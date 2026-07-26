@@ -1,4 +1,5 @@
 import { APIGatewayProxyResultV2 } from 'aws-lambda';
+import { randomUUID } from 'crypto';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
@@ -35,7 +36,8 @@ export function notImplemented(): APIGatewayProxyResultV2 {
 }
 
 export function internalError(err?: unknown): APIGatewayProxyResultV2 {
-  const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-  console.error('Internal error:', err);
-  return { statusCode: 500, headers: JSON_HEADERS, body: JSON.stringify({ error: `Internal error: ${message}` }) };
+  const errorId = randomUUID();
+  // Full details stay in CloudWatch — never sent to the client
+  console.error(`[${errorId}] Internal error:`, err);
+  return { statusCode: 500, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Internal server error', errorId }) };
 }

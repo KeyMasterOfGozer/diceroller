@@ -44,6 +44,10 @@ async function shareMacro(event: APIGatewayProxyEventV2): Promise<APIGatewayProx
 
   const token = randomUUID().replace(/-/g, '');
 
+  // 90-day TTL — DynamoDB will automatically delete expired share records.
+  // Epoch seconds (DynamoDB TTL requirement).
+  const ttlSeconds = Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60;
+
   // Create the public SHARE item
   const shareItem = {
     pk: `SHARE#${token}`, sk: 'META',
@@ -51,6 +55,7 @@ async function shareMacro(event: APIGatewayProxyEventV2): Promise<APIGatewayProx
     name: macro['name'], notation: macro['notation'],
     category: macro['category'], description: macro['description'],
     createdAt: new Date().toISOString(),
+    ttl: ttlSeconds,
   };
   await docClient.send(new PutCommand({ TableName: TABLE_NAME, Item: shareItem }));
 
@@ -131,6 +136,14 @@ async function importFromShare(event: APIGatewayProxyEventV2): Promise<APIGatewa
   if (!sharedResult.Item) return notFound('Shared macro');
 
   const shared = sharedResult.Item as Record<string, unknown>;
+
+  // Guard against importing a shared macro whose notation exceeds the enforced limit.
+  // This prevents ReDoS or excessive parse time in the dice engine on the recipient's client.
+  const notation = shared['notation'];
+  if (typeof notation === 'string' && notation.length > 512) {
+    return badRequest('Shared macro notation exceeds maximum allowed length');
+  }
+
   const macroId = randomUUID();
   const now = new Date().toISOString();
   const item = {

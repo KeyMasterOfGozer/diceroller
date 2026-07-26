@@ -27,6 +27,8 @@ export class DiceRollerTable extends Construct {
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       // Protect against accidental deletion in production
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      // TTL attribute — used by SHARE# records for automatic 90-day expiry
+      timeToLiveAttribute: 'ttl',
     });
 
     // GSI: look up all characters/macros for a user regardless of SK prefix

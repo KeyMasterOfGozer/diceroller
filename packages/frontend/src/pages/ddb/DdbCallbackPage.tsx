@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Loader2, User, ChevronRight, AlertCircle, ArrowLeft } from 'lucide-react';
 import { dndBeyondApi, type DdbCharacter } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -9,58 +9,82 @@ import { useToast } from '@/hooks/use-toast';
 const PENDING_KEY = 'ddb_pending_import';
 const PENDING_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+// The bookmarklet runs on dndbeyond.com, so postMessage arrives from this origin.
+const DDB_ORIGIN = 'https://www.dndbeyond.com';
+
 interface PendingImport {
   characterId: string;
   ts: number;
 }
 
-type Phase = 'loading' | 'picking' | 'importing' | 'done' | 'error';
+// 'waiting' = listening for postMessage from the bookmarklet
+// 'loading'  = token received, fetching character list
+// 'picking'  = user selects which DDB character to import
+// 'importing'= import in flight
+// 'done'     = import complete
+// 'error'    = unrecoverable error
+type Phase = 'waiting' | 'loading' | 'picking' | 'importing' | 'done' | 'error';
 
 export default function DdbCallbackPage() {
-  const [params] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const cobalt = params.get('cobalt') ?? '';
-
-  const [phase, setPhase] = useState<Phase>('loading');
-  const [error, setError] = useState('');
+  const [cobalt, setCobalt]       = useState('');
+  const [phase, setPhase]         = useState<Phase>('waiting');
+  const [error, setError]         = useState('');
   const [characters, setCharacters] = useState<DdbCharacter[]>([]);
-  const [pending, setPending] = useState<PendingImport | null>(null);
+  const [pending, setPending]     = useState<PendingImport | null>(null);
+
+  // ── Set up postMessage listener + read pending import from localStorage ──────
 
   useEffect(() => {
-    if (!cobalt) {
-      setError('No cobalt token in URL. The bookmarklet may have failed — go back and try again.');
-      setPhase('error');
-      return;
-    }
-
-    // Read pending import state stored before navigating to DnD Beyond
+    // Recover the local character we're importing into
     let pendingImport: PendingImport | null = null;
     try {
       const raw = localStorage.getItem(PENDING_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as PendingImport;
-        if (Date.now() - parsed.ts < PENDING_TTL_MS) {
-          pendingImport = parsed;
-        }
+        if (Date.now() - parsed.ts < PENDING_TTL_MS) pendingImport = parsed;
         localStorage.removeItem(PENDING_KEY);
       }
-    } catch {
-      // ignore parse errors
-    }
+    } catch { /* ignore parse errors */ }
     setPending(pendingImport);
 
-    // Fetch the user's DnD Beyond characters
-    dndBeyondApi.listCharacters(cobalt).then(chars => {
-      setCharacters(chars);
-      setPhase('picking');
-    }).catch(err => {
-      setError((err as Error).message || 'Could not load D&D Beyond characters. Your session may have expired.');
-      setPhase('error');
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Listen for the CobaltSession token from the bookmarklet.
+    // The bookmarklet runs on dndbeyond.com, so we validate e.origin against
+    // DDB_ORIGIN (not window.location.origin) — the message crosses origins.
+    function onMessage(e: MessageEvent) {
+      if (e.origin !== DDB_ORIGIN) return;
+      const data = e.data as { type?: string; token?: string } | null;
+      if (data?.type !== 'COBALT_TOKEN' || !data.token) return;
+      setCobalt(data.token);
+    }
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, []);
+
+  // ── When the token arrives, load DDB characters ───────────────────────────────
+
+  useEffect(() => {
+    if (!cobalt) return;
+    setPhase('loading');
+
+    dndBeyondApi.listCharacters(cobalt)
+      .then(chars => {
+        setCharacters(chars);
+        setPhase('picking');
+      })
+      .catch(err => {
+        setError(
+          (err as Error).message ||
+          'Could not load D&D Beyond characters. Your session may have expired.',
+        );
+        setPhase('error');
+      });
+  }, [cobalt]);
+
+  // ── Import the selected DDB character into the pending local character ────────
 
   async function handleImport(ddbChar: DdbCharacter, targetCharacterId: string) {
     setPhase('importing');
@@ -71,7 +95,6 @@ export default function DdbCallbackPage() {
         description: 'Stat variables have been updated.',
       });
       setPhase('done');
-      // Navigate back to the character page after a short delay
       setTimeout(() => navigate(`/characters/${targetCharacterId}`), 1500);
     } catch (err) {
       setError((err as Error).message ?? 'Import failed.');
@@ -82,9 +105,6 @@ export default function DdbCallbackPage() {
   function classString(char: DdbCharacter): string {
     return char.classes.map(c => `${c.name} ${c.level}`).join(' / ');
   }
-
-  // If we have a pending characterId, skip the target-character step and go straight to the DnD character picker.
-  // The user already chose which local character to import into before clicking the bookmarklet.
 
   return (
     <div className="mx-auto max-w-lg space-y-6 py-4">
@@ -108,7 +128,22 @@ export default function DdbCallbackPage() {
         </CardHeader>
         <CardContent className="space-y-4">
 
-          {/* Loading */}
+          {/* Waiting for bookmarklet */}
+          {phase === 'waiting' && (
+            <div className="space-y-3 py-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Waiting for the bookmarklet…
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Click the <strong>DnD Import</strong> bookmark while you are on D&D Beyond.
+                This page will update automatically once the token is received.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => navigate(-1)}>Go back</Button>
+            </div>
+          )}
+
+          {/* Loading characters */}
           {phase === 'loading' && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -131,18 +166,18 @@ export default function DdbCallbackPage() {
           {(phase === 'picking' || phase === 'importing') && (
             <div className="space-y-3">
               {characters.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No characters found on this D&D Beyond account.</p>
+                <p className="text-sm text-muted-foreground">
+                  No characters found on this D&D Beyond account.
+                </p>
               ) : (
                 <ul className="space-y-1.5">
                   {characters.map(char => (
                     <li key={char.id}>
                       <button
                         type="button"
-                        disabled={phase === 'importing'}
+                        disabled={phase === 'importing' || !pending?.characterId}
                         onClick={() => {
-                          if (pending?.characterId) {
-                            handleImport(char, pending.characterId);
-                          }
+                          if (pending?.characterId) handleImport(char, pending.characterId);
                         }}
                         className="flex w-full items-center gap-3 rounded-lg border bg-card px-3 py-2.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                       >
@@ -173,7 +208,8 @@ export default function DdbCallbackPage() {
 
               {!pending?.characterId && (
                 <p className="text-xs text-muted-foreground">
-                  No target character was found. Go back to your character page and start the import from there.
+                  No target character was found. Go back to your character page and start the
+                  import from there.
                 </p>
               )}
 

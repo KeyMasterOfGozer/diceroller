@@ -6,9 +6,25 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
-// Bookmarklet that reads CobaltSession from dndbeyond.com and redirects back.
+// Bookmarklet that reads CobaltSession from dndbeyond.com and sends it via postMessage.
+// Using postMessage (not a redirect) keeps the token out of URLs, browser history,
+// and access logs. The callback page opens in its own window; postMessage bridges origins.
 // Must be a single expression — no newlines — so it survives the href attribute.
-const BOOKMARKLET_HREF = `javascript:(function(){var m=document.cookie.match(/(?:^|;\\s*)CobaltSession=([^;]+)/);if(m){window.location.href='${window.location.origin}/ddb-callback?cobalt='+encodeURIComponent(m[1]);}else{alert('CobaltSession cookie not found.\\n\\nEither you are not logged in to D\\u0026D Beyond, or the cookie is marked HttpOnly (browser security).\\n\\nFall back to the manual paste method instead.');}})();`;
+const BOOKMARKLET_HREF = [
+  `javascript:(function(){`,
+  `var m=document.cookie.match(/(?:^|;\\s*)CobaltSession=([^;]+)/);`,
+  `if(!m){alert('CobaltSession cookie not found.\\n\\nEither you are not logged in to D\\u0026D Beyond, or the cookie is marked HttpOnly (browser security).\\n\\nFall back to the manual paste method instead.');return;}`,
+  `var token=m[1];`,
+  `var origin='${window.location.origin}';`,
+  `var w=window.open(origin+'/ddb-callback','ddb_import');`,
+  `if(!w){alert('Popup blocked. Please allow popups for this site and try again.');return;}`,
+  `var attempts=0;`,
+  `var timer=setInterval(function(){`,
+  `if(++attempts>40){clearInterval(timer);alert('Could not connect to the import page. Please try again.');return;}`,
+  `try{w.postMessage({type:'COBALT_TOKEN',token:token},origin);}catch(e){}`,
+  `},250);`,
+  `})();`,
+].join('');
 
 const DDB_URL = 'https://www.dndbeyond.com';
 
@@ -191,7 +207,7 @@ export function DndBeyondImportSection({ characterId, onImported }: Props) {
                       </a>
                     </li>
                     <li>Click the button below to open D&D Beyond and sign in if needed.</li>
-                    <li>Click the <strong>DnD Import</strong> bookmark — it will send your token here automatically.</li>
+                    <li>Click the <strong>DnD Import</strong> bookmark — it will open a new window and send your token automatically.</li>
                   </ol>
                   <p className="text-xs text-muted-foreground">
                     The bookmarklet only runs on D&D Beyond and sends your token directly to this app.
@@ -216,7 +232,7 @@ export function DndBeyondImportSection({ characterId, onImported }: Props) {
                 </Button>
 
                 <p className="text-xs text-muted-foreground">
-                  After clicking the bookmark, you'll be redirected back here to finish the import.
+                  After clicking the bookmark, a new window will open to finish the import.
                   {' '}If the bookmarklet shows a "cookie not found" error, use the{' '}
                   <button
                     type="button"

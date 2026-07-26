@@ -10,7 +10,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   try {
     const { routeKey } = event;
     switch (routeKey) {
-      case 'GET /dndbeyond/characters':                                      return listDndCharacters(event);
+      case 'POST /dndbeyond/characters':                                     return listDndCharacters(event);
       case 'POST /characters/{id}/import/dndbeyond/{ddbCharId}':            return importCharacter(event);
       default:                                                               return notImplemented();
     }
@@ -19,16 +19,17 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   }
 };
 
-/** GET /dndbeyond/characters
+/** POST /dndbeyond/characters
  *  Lists the authenticated user's D&D Beyond characters.
- *  Query param: accessToken (D&D Beyond OAuth token, passed from client)
+ *  Body: { accessToken: string } — CobaltSession token from the D&D Beyond browser cookie.
  *
- *  Note: The D&D Beyond access token is passed as a query param because it's
- *  ephemeral and user-owned — we never persist it server-side.
+ *  POST (not GET) so the token travels in the request body and never appears in
+ *  API Gateway access logs, CloudFront logs, or browser history.
  */
 async function listDndCharacters(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-  const cobaltSession = event.queryStringParameters?.['accessToken'];
-  if (!cobaltSession) return badRequest('accessToken query param is required');
+  const body = JSON.parse(event.body ?? '{}') as { accessToken?: string };
+  const cobaltSession = body.accessToken;
+  if (!cobaltSession) return badRequest('accessToken body field is required');
 
   // Exchange the CobaltSession browser cookie for a short-lived JWT + userId
   let auth: CobaltAuth;
@@ -195,7 +196,6 @@ async function cobaltSessionToJwt(cobaltSession: string): Promise<CobaltAuth> {
   let userId = '';
   try {
     const payload = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8')) as Record<string, unknown>;
-    console.log('JWT payload keys:', Object.keys(payload), '| sub:', payload['sub'], '| userId:', payload['userId']);
     // DnD Beyond may use a namespaced claim or a numeric sub
     userId = String(
       payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier']
@@ -207,7 +207,6 @@ async function cobaltSessionToJwt(cobaltSession: string): Promise<CobaltAuth> {
     console.warn('Could not decode JWT payload to extract userId:', e);
   }
 
-  console.log('Cobalt JWT obtained, userId:', userId);
   return { jwt, userId };
 }
 

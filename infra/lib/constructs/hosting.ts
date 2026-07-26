@@ -39,6 +39,50 @@ export class DiceRollerHosting extends Construct {
       autoDeleteObjects: false,
     });
 
+    // ── Security response-headers policy ─────────────────────────────────
+    // Use the stack region token so URLs resolve correctly at deploy time.
+    const region = cdk.Stack.of(this).region;
+
+    const securityHeaders = new cloudfront.ResponseHeadersPolicy(this, 'SecurityHeaders', {
+      responseHeadersPolicyName: 'DiceRollerSecurityHeaders',
+      securityHeadersBehavior: {
+        contentSecurityPolicy: {
+          // connect-src must cover:
+          //   • cognito-idp.<region>.amazonaws.com  — Amplify v6 SRP auth (NOT *.amazoncognito.com)
+          //   • *.amazoncognito.com                 — Cognito hosted UI / OAuth token endpoint
+          //   • *.execute-api.<region>.amazonaws.com — API Gateway HTTP API
+          // CSP wildcards only match ONE label, so we must spell out the region explicitly.
+          contentSecurityPolicy: [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: https://*.dndbeyond.com",
+            "font-src 'self'",
+            `connect-src 'self' https://cognito-idp.${region}.amazonaws.com https://*.amazoncognito.com https://*.execute-api.${region}.amazonaws.com`,
+            "object-src 'none'",
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+          ].join('; '),
+          override: true,
+        },
+        strictTransportSecurity: {
+          accessControlMaxAge: cdk.Duration.days(365),
+          includeSubdomains: true,
+          preload: true,
+          override: true,
+        },
+        frameOptions: {
+          frameOption: cloudfront.HeadersFrameOption.DENY,
+          override: true,
+        },
+        contentTypeOptions: { override: true },
+        referrerPolicy: {
+          referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+          override: true,
+        },
+      },
+    });
+
     // ── CloudFront distribution with OAC + custom domain ─────────────────
     this.distribution = new cloudfront.Distribution(this, 'Distribution', {
       domainNames: [DOMAIN],
@@ -47,6 +91,7 @@ export class DiceRollerHosting extends Construct {
         origin: origins.S3BucketOrigin.withOriginAccessControl(this.bucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        responseHeadersPolicy: securityHeaders,
         compress: true,
       },
       defaultRootObject: 'index.html',

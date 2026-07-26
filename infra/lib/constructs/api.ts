@@ -112,17 +112,21 @@ export class DiceRollerApi extends Construct {
       resources: [userPool.userPoolArn],
     }));
 
+    // Restrict CloudWatch access to the five non-admin Lambda log groups — no wildcard.
+    // adminFn is intentionally excluded: including it would create a circular CDK dependency
+    // (adminFn's role policy would reference adminFn.functionName before the function exists),
+    // and LOG_GROUP_ADMIN is not set in the env so the handler never queries its own logs.
+    const logFunctions = [meFn, charactersFn, macrosFn, sharingFn, dndBeyondFn];
     adminFn.addToRolePolicy(new iam.PolicyStatement({
       actions: [
         'logs:FilterLogEvents',
         'logs:DescribeLogGroups',
         'logs:DescribeLogStreams',
       ],
-      // Restrict to our own log groups only
-      resources: [
-        `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/aws/lambda/DiceRoller*:*`,
-        `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/aws/lambda/DiceRoller*`,
-      ],
+      resources: logFunctions.flatMap(fn => [
+        `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/aws/lambda/${fn.functionName}`,
+        `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/aws/lambda/${fn.functionName}:*`,
+      ]),
     }));
 
     // ── JWT Authorizer (Cognito) ──────────────────────────────────────────
@@ -183,7 +187,8 @@ export class DiceRollerApi extends Construct {
 
     // ── D&D Beyond OAuth + import ─────────────────────────────────────────
     this.api.addRoutes({ path: '/dndbeyond/token',                                 methods: [apigw.HttpMethod.POST],                                integration: dndInt, ...auth });
-    this.api.addRoutes({ path: '/dndbeyond/characters',                            methods: [apigw.HttpMethod.GET],                                 integration: dndInt, ...auth });
+    // POST so the CobaltSession token travels in the request body, not a query param
+    this.api.addRoutes({ path: '/dndbeyond/characters',                            methods: [apigw.HttpMethod.POST],                                integration: dndInt, ...auth });
     this.api.addRoutes({ path: '/characters/{id}/import/dndbeyond/{ddbCharId}',   methods: [apigw.HttpMethod.POST],                                integration: dndInt, ...auth });
 
     // ── Admin ─────────────────────────────────────────────────────────────
@@ -195,6 +200,15 @@ export class DiceRollerApi extends Construct {
     this.api.addRoutes({ path: '/admin/users/{username}/reset-password',           methods: [apigw.HttpMethod.POST],                                integration: adminInt, ...auth });
     this.api.addRoutes({ path: '/admin/users/{username}',                          methods: [apigw.HttpMethod.DELETE],                              integration: adminInt, ...auth });
     this.api.addRoutes({ path: '/admin/logs',                                      methods: [apigw.HttpMethod.GET],                                 integration: adminInt, ...auth });
+
+    // ── Stage-level throttling (C2) ───────────────────────────────────────
+    // API Gateway HTTP API creates a $default stage automatically; we reach into
+    // it via the L1 escape hatch to add per-stage default route settings.
+    const cfnDefaultStage = this.api.defaultStage!.node.defaultChild as apigw.CfnStage;
+    cfnDefaultStage.defaultRouteSettings = {
+      throttlingBurstLimit: 200,   // max concurrent in-flight requests
+      throttlingRateLimit:  100,   // steady-state requests/second
+    };
 
     // ── Output ────────────────────────────────────────────────────────────
     new cdk.CfnOutput(scope, 'ApiUrl', {

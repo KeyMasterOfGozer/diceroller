@@ -13,6 +13,22 @@ import {
 } from '@aws-sdk/client-cloudwatch-logs';
 import { ok, forbidden, badRequest, notImplemented, internalError } from '../lib/response.js';
 
+// ── Input guards ──────────────────────────────────────────────────────────────
+
+/** Strip characters that could break a Cognito filter expression. Only allow
+ *  characters valid in an email address — nothing that changes the filter syntax. */
+function sanitizeCognitoEmailPrefix(raw: string): string {
+  return raw.replace(/[^a-zA-Z0-9@._+\-]/g, '').slice(0, 128);
+}
+
+/** Reject CloudWatch filter patterns that are excessively long or contain too many
+ *  compound clauses — prevents expensive multi-GB log scans triggered by a crafted pattern. */
+function isValidLogPattern(pattern: string): boolean {
+  if (pattern.length > 512) return false;
+  const compoundCount = (pattern.match(/&&|\|\|/g) ?? []).length;
+  return compoundCount <= 5;
+}
+
 const USER_POOL_ID = process.env.USER_POOL_ID!;
 
 const cognitoClient = new CognitoIdentityProviderClient({});
@@ -81,7 +97,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 
 async function listUsers(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const qs              = event.queryStringParameters ?? {};
-  const search          = qs['search'];
+  const search          = qs['search'] ? sanitizeCognitoEmailPrefix(qs['search']) : '';
   const paginationToken = qs['token'];
 
   const result = await cognitoClient.send(new ListUsersCommand({
@@ -141,6 +157,10 @@ async function getLogs(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRe
   const filter = qs['filter'] ?? 'ERROR';
   const limit  = Math.min(parseInt(qs['limit'] ?? '100', 10), 500);
   const hours  = Math.min(parseInt(qs['hours'] ?? '24', 10), 168); // max 7 days
+
+  if (filter && !isValidLogPattern(filter)) {
+    return badRequest('filter pattern too complex or too long (max 512 chars, 5 compound operators)');
+  }
 
   // Without fn, return the list of available log group keys
   if (!fn) {

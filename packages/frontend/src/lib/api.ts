@@ -199,9 +199,12 @@ export interface DdbImportResult {
 }
 
 export const dndBeyondApi = {
-  /** List characters using a Cobalt session token (from DnD Beyond cookies). */
+  /** List characters using a Cobalt session token (from DnD Beyond cookies).
+   *  Sent as POST body — never as a query param — so the token doesn't appear in
+   *  access logs, CloudFront logs, or browser history.
+   */
   listCharacters: (cobaltToken: string) =>
-    request<DdbCharacter[]>(`GET`, `/dndbeyond/characters?accessToken=${encodeURIComponent(cobaltToken)}`),
+    request<DdbCharacter[]>('POST', '/dndbeyond/characters', { accessToken: cobaltToken }),
   /** Import a DnD Beyond character's stats into a local character. */
   importCharacter: (cobaltToken: string, dndCharacterId: number, targetCharacterId: string) =>
     request<DdbImportResult>(

@@ -19,11 +19,11 @@ export class DiceRollerUserPool extends Construct {
         email: { required: true, mutable: true },
       },
       passwordPolicy: {
-        minLength: 8,
+        minLength: 12,
         requireUppercase: true,
         requireLowercase: true,
         requireDigits: true,
-        requireSymbols: false,
+        requireSymbols: true,
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       // Email verification (sign-up) + password reset both use this template.
