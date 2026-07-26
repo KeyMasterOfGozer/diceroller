@@ -477,7 +477,6 @@ export default function MacrosPage() {
               attackId, attackPart: 'damage', attackName: m.name,
             });
           }
-          setAttackResults(prev => ({ ...prev, [m.macroId]: atkResult }));
         } else {
           const result = roll(m.notation, { variables: vars, advantageMode });
           results.push({ kind: 'roll', macroName: m.name, result });
@@ -485,7 +484,6 @@ export default function MacrosPage() {
             characterId: charId!, notation: m.notation, result,
             rolledAt, macroName: m.name, comboId, comboName: combo.name,
           });
-          setMacroResults(prev => ({ ...prev, [m.macroId]: result }));
         }
       } catch {
         // silently skip a broken constituent
