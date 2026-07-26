@@ -9,14 +9,16 @@ export interface RollHistoryEntry {
   notation: string;
   result: RollResult;
   rolledAt: Date;
-  // Combo grouping — set on every constituent roll of a combo
-  macroName?: string;   // display name of the individual macro
-  comboId?: string;     // shared UUID that groups all rolls from one combo trigger
-  comboName?: string;   // display name of the combo macro
-  // Attack grouping — set on both to-hit and damage rolls of an attack macro
-  attackId?: string;    // shared UUID that groups the to-hit + damage rolls
-  attackPart?: 'to-hit' | 'damage'; // which part of the attack this entry represents
-  attackName?: string;  // display name of the attack macro
+  /** Display name for this entry: attack macro name (standalone), or constituent macro name (within a combo). */
+  label?: string;
+  /** UUID grouping all rolls from one combo trigger. */
+  comboId?: string;
+  /** Display name of the parent combo macro — used as the group header. */
+  comboName?: string;
+  /** UUID grouping the to-hit and damage rolls of one attack macro. */
+  attackId?: string;
+  /** Which part of the attack this entry represents. */
+  attackPart?: 'to-hit' | 'damage';
 }
 
 export interface UserPrefs {
@@ -36,6 +38,20 @@ class DiceRollerDB extends Dexie {
       rollHistory: '++id, characterId, rolledAt, [characterId+rolledAt]',
       prefs: '++id',
     });
+    // v2: consolidate macroName + attackName → label; delete the old fields.
+    this.version(2).stores({
+      rollHistory: '++id, characterId, rolledAt, [characterId+rolledAt]',
+      prefs: '++id',
+    }).upgrade(tx =>
+      tx.table('rollHistory').toCollection().modify((entry: Record<string, unknown>) => {
+        if (!entry['label']) {
+          const legacy = entry['attackName'] ?? entry['macroName'];
+          if (legacy !== undefined) entry['label'] = legacy;
+        }
+        delete entry['attackName'];
+        delete entry['macroName'];
+      })
+    );
   }
 }
 

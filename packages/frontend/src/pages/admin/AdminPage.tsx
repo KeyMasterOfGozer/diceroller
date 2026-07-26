@@ -6,6 +6,8 @@ import { adminApi, type AdminUser, type AdminLogEvent } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { formatISODate, formatTimestamp } from '@/lib/utils';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,49 +20,9 @@ interface ConfirmAction {
   onConfirm: () => Promise<unknown>;
 }
 
-// ── Confirm dialog (inline — no external component needed) ────────────────────
-
-function ConfirmDialog({ action, onClose }: { action: ConfirmAction; onClose: () => void }) {
-  const [busy, setBusy] = useState(false);
-
-  async function handleConfirm() {
-    setBusy(true);
-    try {
-      await action.onConfirm();
-    } finally {
-      setBusy(false);
-      onClose();
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      {/* Dialog */}
-      <div className="relative z-10 mx-4 w-full max-w-md rounded-lg border bg-background p-6 shadow-xl">
-        <h2 className="text-lg font-semibold">{action.label}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">{action.description}</p>
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="outline" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            variant={action.destructive ? 'destructive' : 'default'}
-            onClick={handleConfirm}
-            disabled={busy}
-          >
-            {busy ? 'Working…' : 'Confirm'}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function statusBadge(user: AdminUser) {
+function StatusBadge({ user }: { user: AdminUser }) {
   if (!user.enabled) {
     return <Badge variant="secondary" className="text-xs">Disabled</Badge>;
   }
@@ -78,31 +40,16 @@ function statusBadge(user: AdminUser) {
   }
 }
 
-function fmtDate(iso: string | null) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function fmtTime(ts: number) {
-  return new Date(ts).toLocaleString('en-US', {
-    month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  });
-}
-
 // ── Users Tab ─────────────────────────────────────────────────────────────────
 
 function UsersTab() {
-  const [users, setUsers]             = useState<AdminUser[]>([]);
-  const [nextToken, setNextToken]     = useState<string | null>(null);
-  const [search, setSearch]           = useState('');
-  const [liveSearch, setLiveSearch]   = useState('');
-  const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState('');
-  const [actionError, setActionError] = useState('');
-  const [confirm, setConfirm]         = useState<ConfirmAction | null>(null);
-  const [busy, setBusy]               = useState<string | null>(null);
+  const [users, setUsers]         = useState<AdminUser[]>([]);
+  const [nextToken, setNextToken] = useState<string | null>(null);
+  const [search, setSearch]       = useState('');
+  const [liveSearch, setLiveSearch] = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
+  const [confirm, setConfirm]     = useState<ConfirmAction | null>(null);
 
   const load = useCallback(async (searchVal: string, pageToken?: string) => {
     setLoading(true);
@@ -128,26 +75,17 @@ function UsersTab() {
     load(liveSearch);
   }
 
-  async function runAction(username: string, fn: () => Promise<unknown>) {
-    setBusy(username);
-    setActionError('');
-    try {
-      await fn();
-      setUsers([]);
-      setNextToken(null);
-      await load(search);
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Action failed');
-    } finally {
-      setBusy(null);
-    }
+  async function reloadUsers() {
+    setUsers([]);
+    setNextToken(null);
+    await load(search);
   }
 
   function promptDisable(user: AdminUser) {
     setConfirm({
       label: `Disable ${user.email}`,
       description: `This will prevent ${user.email} from signing in. You can re-enable them at any time.`,
-      onConfirm: () => runAction(user.username, () => adminApi.disableUser(user.username)),
+      onConfirm: async () => { await adminApi.disableUser(user.username); await reloadUsers(); },
     });
   }
 
@@ -155,7 +93,7 @@ function UsersTab() {
     setConfirm({
       label: `Enable ${user.email}`,
       description: `This will restore ${user.email}'s ability to sign in.`,
-      onConfirm: () => runAction(user.username, () => adminApi.enableUser(user.username)),
+      onConfirm: async () => { await adminApi.enableUser(user.username); await reloadUsers(); },
     });
   }
 
@@ -163,7 +101,7 @@ function UsersTab() {
     setConfirm({
       label: `Reset password for ${user.email}`,
       description: `This will send a password-reset email to ${user.email} and invalidate their current password.`,
-      onConfirm: () => runAction(user.username, () => adminApi.resetPassword(user.username)),
+      onConfirm: async () => { await adminApi.resetPassword(user.username); await reloadUsers(); },
     });
   }
 
@@ -172,7 +110,7 @@ function UsersTab() {
       label: `Delete ${user.email}`,
       description: `This will permanently delete the Cognito account for ${user.email}. Their characters and macros in the database are unaffected.`,
       destructive: true,
-      onConfirm: () => runAction(user.username, () => adminApi.deleteUser(user.username)),
+      onConfirm: async () => { await adminApi.deleteUser(user.username); await reloadUsers(); },
     });
   }
 
@@ -207,9 +145,6 @@ function UsersTab() {
       {error && (
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
       )}
-      {actionError && (
-        <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{actionError}</p>
-      )}
 
       {/* Table */}
       <div className="overflow-x-auto rounded-md border">
@@ -236,14 +171,14 @@ function UsersTab() {
                   <p className="font-medium">{u.email || '(no email)'}</p>
                   <p className="text-xs text-muted-foreground font-mono">{u.username}</p>
                 </td>
-                <td className="px-4 py-3">{statusBadge(u)}</td>
-                <td className="px-4 py-3 text-muted-foreground">{fmtDate(u.createdAt)}</td>
+                <td className="px-4 py-3"><StatusBadge user={u} /></td>
+                <td className="px-4 py-3 text-muted-foreground">{formatISODate(u.createdAt)}</td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
                     {u.enabled ? (
                       <Button
                         variant="ghost" size="icon" className="h-7 w-7"
-                        title="Disable account" disabled={busy === u.username}
+                        title="Disable account" disabled={loading}
                         onClick={() => promptDisable(u)}
                       >
                         <Lock className="h-3.5 w-3.5" />
@@ -251,7 +186,7 @@ function UsersTab() {
                     ) : (
                       <Button
                         variant="ghost" size="icon" className="h-7 w-7"
-                        title="Enable account" disabled={busy === u.username}
+                        title="Enable account" disabled={loading}
                         onClick={() => promptEnable(u)}
                       >
                         <Unlock className="h-3.5 w-3.5" />
@@ -259,14 +194,14 @@ function UsersTab() {
                     )}
                     <Button
                       variant="ghost" size="icon" className="h-7 w-7"
-                      title="Send password reset email" disabled={busy === u.username}
+                      title="Send password reset email" disabled={loading}
                       onClick={() => promptReset(u)}
                     >
                       <KeyRound className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
-                      title="Delete account" disabled={busy === u.username}
+                      title="Delete account" disabled={loading}
                       onClick={() => promptDelete(u)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -288,7 +223,15 @@ function UsersTab() {
         </div>
       )}
 
-      {confirm && <ConfirmDialog action={confirm} onClose={() => setConfirm(null)} />}
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.label}
+          description={confirm.description}
+          destructive={confirm.destructive}
+          onConfirm={confirm.onConfirm}
+          onClose={() => setConfirm(null)}
+        />
+      )}
     </div>
   );
 }
@@ -410,7 +353,7 @@ function LogsTab() {
           <div className="max-h-[60vh] divide-y overflow-y-auto font-mono text-xs">
             {events.map((e, i) => (
               <div key={i} className="flex gap-3 px-4 py-2 hover:bg-muted/30">
-                <span className="shrink-0 text-muted-foreground">{fmtTime(e.timestamp)}</span>
+                <span className="shrink-0 text-muted-foreground">{formatTimestamp(e.timestamp)}</span>
                 <span className={`whitespace-pre-wrap break-all ${levelColor(e.message)}`}>
                   {e.message}
                 </span>

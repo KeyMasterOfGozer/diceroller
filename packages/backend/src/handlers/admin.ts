@@ -18,13 +18,15 @@ const USER_POOL_ID = process.env.USER_POOL_ID!;
 const cognitoClient = new CognitoIdentityProviderClient({});
 const logsClient    = new CloudWatchLogsClient({});
 
-// Log groups injected by CDK: LOG_GROUP_ME, LOG_GROUP_CHARACTERS, etc.
-const LOG_GROUPS: Record<string, string> = {};
-for (const [key, val] of Object.entries(process.env)) {
-  if (key.startsWith('LOG_GROUP_') && val) {
-    LOG_GROUPS[key.slice('LOG_GROUP_'.length).toLowerCase()] = val;
-  }
-}
+// Log groups injected by CDK — enumerate expected keys explicitly rather than
+// scanning all env vars, which is fragile and picks up unrelated LOG_GROUP_* vars.
+const LAMBDA_KEYS = ['ME', 'CHARACTERS', 'MACROS', 'SHARING', 'DNDBEYOND', 'ADMIN'] as const;
+const LOG_GROUPS: Record<string, string> = Object.fromEntries(
+  LAMBDA_KEYS.flatMap(k => {
+    const val = process.env[`LOG_GROUP_${k}`];
+    return val ? [[k.toLowerCase(), val]] : [];
+  })
+);
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
