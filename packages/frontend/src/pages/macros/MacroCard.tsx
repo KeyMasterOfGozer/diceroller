@@ -253,7 +253,7 @@ export function MacroCard({
     >
       <Card className="transition-shadow hover:shadow-md">
         <CardContent className="p-4">
-          {isEditing ? <EditView /> : <ReadView />}
+          {isEditing ? renderEditView() : renderReadView()}
         </CardContent>
       </Card>
 
@@ -272,9 +272,10 @@ export function MacroCard({
     </div>
   );
 
-  // ── Sub-views (closures so they share state without prop drilling) ─────────
+  // ── Sub-views (plain render functions, not components — rendering them as
+  // <EditView /> would remount on every keystroke and steal input focus) ─────
 
-  function EditView() {
+  function renderEditView() {
     return (
       <div className="flex flex-col gap-3">
         <div className="grid grid-cols-2 gap-3">
@@ -352,7 +353,7 @@ export function MacroCard({
     );
   }
 
-  function ReadView() {
+  function renderReadView() {
     return (
       <div className="flex items-start gap-2">
         <GripVertical className="mt-0.5 h-5 w-5 shrink-0 cursor-grab select-none text-muted-foreground/30 hover:text-muted-foreground/70 active:cursor-grabbing" />
@@ -433,13 +434,13 @@ export function MacroCard({
           </div>
 
           {/* Roll results */}
-          <RollResults />
+          {renderRollResults()}
         </div>
       </div>
     );
   }
 
-  function RollResults() {
+  function renderRollResults() {
     if (isCombo && comboResult) {
       return (
         <div className="mt-3 space-y-2">
